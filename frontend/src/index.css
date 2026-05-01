@@ -1,0 +1,108 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --background: 40 60% 97%;
+  --foreground: 24 24% 18%;
+  --card: 0 0% 100%;
+  --card-foreground: 24 24% 18%;
+  --popover: 0 0% 100%;
+  --popover-foreground: 24 24% 18%;
+  --primary: 16 86% 57%;
+  --primary-foreground: 0 0% 100%;
+  --secondary: 42 92% 91%;
+  --secondary-foreground: 24 24% 18%;
+  --accent: 164 47% 88%;
+  --accent-foreground: 166 48% 24%;
+  --muted: 36 52% 93%;
+  --muted-foreground: 26 18% 44%;
+  --destructive: 0 84.2% 60.2%;
+  --destructive-foreground: 210 40% 98%;
+  --border: 31 38% 86%;
+  --input: 31 38% 86%;
+  --ring: 16 86% 57%;
+  --radius-md: 0.5rem;
+  --radius-lg: 0.625rem;
+  --radius-xl: 0.75rem;
+  font-family: "SF Pro Display", "SF Pro Text", "Avenir Next", "Segoe UI", sans-serif;
+  color: #33251f;
+  background: #fff7ec;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background:
+    radial-gradient(circle at 12% 8%, rgba(255, 204, 128, 0.35), transparent 26%),
+    radial-gradient(circle at 88% 12%, rgba(125, 211, 194, 0.32), transparent 24%),
+    linear-gradient(180deg, #fffaf1 0%, #f7efe4 100%);
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+.recommend-marker {
+  min-width: 48px;
+  border-radius: 6px;
+  border: 1px solid rgba(20, 184, 166, 0.4);
+  background: rgba(240, 253, 250, 0.96);
+  color: #0f766e;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 22px;
+  text-align: center;
+  box-shadow: 0 10px 28px rgba(15, 23, 42, 0.18);
+}
+
+.metric-bubble {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  border: 2px solid rgba(255, 255, 255, 0.92);
+  border-radius: 9999px;
+  background: color-mix(in srgb, var(--bubble-color) 82%, white);
+  color: #0f172a;
+  box-shadow: 0 12px 30px rgba(15, 23, 42, 0.22);
+  line-height: 1.05;
+  pointer-events: auto;
+}
+
+.metric-bubble-name {
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.metric-bubble-value {
+  margin-top: 2px;
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.map-tooltip {
+  min-width: 180px;
+  font-size: 12px;
+  line-height: 1.8;
+  color: #334155;
+}
+
+.map-tooltip-title {
+  margin-bottom: 4px;
+  color: #0f172a;
+  font-size: 14px;
+  font-weight: 700;
+}
