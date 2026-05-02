@@ -32,3 +32,10 @@ export type Summary = {
   scatter: DistrictMetric[];
   recommendations: DistrictMetric[];
 };
+
+export type AIAdvice = {
+  district: string;
+  prompt: string;
+  advice: string;
+  is_placeholder: boolean;
+};

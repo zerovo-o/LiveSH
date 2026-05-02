@@ -20,36 +20,36 @@ export default function StatsPanel({ selected, districts, onSelectDistrict }: St
   const isAll = selected === null;
 
   return (
-    <section className="rounded-lg border border-slate-200 bg-white/90 p-4 shadow-soft">
+    <section className="rounded-[20px] border border-[#ead8c2] bg-[#fff8ed]/82 p-5 shadow-[0_18px_56px_rgba(104,72,42,0.10)] backdrop-blur-sm">
       <div className="shrink-0">
-        <div className="flex items-center justify-between">
-          <h2 className="text-base font-semibold text-slate-900">区域选择</h2>
-          <Badge>{districts.length} 个区</Badge>
+        <div className="flex flex-wrap items-center gap-3">
+          <h2 className="text-2xl font-black text-[#33251f]">区域选择</h2>
+          <Select
+            value={selected?.district ?? ALL_VALUE}
+            onValueChange={(value) => onSelectDistrict(value === ALL_VALUE ? null : value)}
+          >
+            <SelectTrigger className="h-10 w-44 border-[#ead8c2] bg-white/72 text-[#33251f] shadow-[0_8px_24px_rgba(104,72,42,0.06)]">
+              <SelectValue placeholder="选择区域" />
+            </SelectTrigger>
+            <SelectContent className="w-44 min-w-44">
+              <SelectGroup>
+                <SelectItem value={ALL_VALUE}>全部区域</SelectItem>
+                {districts.map((item) => (
+                  <SelectItem key={item.district} value={item.district}>
+                    {item.district}
+                  </SelectItem>
+                ))}
+              </SelectGroup>
+            </SelectContent>
+          </Select>
+          <Badge variant="outline" className="ml-auto border-[#f3c99a] bg-[#fff4df] text-[#9a5a1d]">{districts.length} 个区</Badge>
         </div>
-        <Select
-          value={selected?.district ?? ALL_VALUE}
-          onValueChange={(value) => onSelectDistrict(value === ALL_VALUE ? null : value)}
-        >
-          <SelectTrigger className="mt-3 w-full bg-white">
-            <SelectValue placeholder="选择区域" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectGroup>
-              <SelectItem value={ALL_VALUE}>全部区域</SelectItem>
-              {districts.map((item) => (
-                <SelectItem key={item.district} value={item.district}>
-                  {item.district}
-                </SelectItem>
-              ))}
-            </SelectGroup>
-          </SelectContent>
-        </Select>
       </div>
 
-      <Card className="mt-4 shadow-none">
+      <Card className="mt-4 border-[#f1dfc9] bg-[#fffdf8]/82 shadow-none">
         <CardHeader>
-          <CardTitle>{isAll ? "全市汇总" : `${active.district} 区域详情`}</CardTitle>
-          <Badge>{isAll ? "全部" : `评分 ${formatScore(active.livability_score)}`}</Badge>
+          <CardTitle className="text-[#33251f]">{isAll ? "全市汇总" : `${active.district} 区域详情`}</CardTitle>
+          <Badge className="bg-[#ff7a4f] text-white">{isAll ? "全部" : `评分 ${formatScore(active.livability_score)}`}</Badge>
         </CardHeader>
         <CardContent>
           <div className="grid grid-cols-2 gap-3 text-sm md:grid-cols-3 xl:grid-cols-4">
@@ -81,12 +81,12 @@ export default function StatsPanel({ selected, districts, onSelectDistrict }: St
 
 function Metric({ label, value, icon }: { label: string; value: string; icon: ReactNode }) {
   return (
-    <div className="rounded-lg bg-slate-50 p-3">
-      <div className="flex items-center gap-2 text-xs text-slate-500">
+    <div className="rounded-xl border border-[#f4e3cf] bg-[#fff8ed]/72 p-3">
+      <div className="flex items-center gap-2 text-xs text-[#8a6f5a]">
         {icon}
         {label}
       </div>
-      <div className="mt-2 text-base font-semibold text-slate-900">{value}</div>
+      <div className="mt-2 text-base font-semibold text-[#33251f]">{value}</div>
     </div>
   );
 }

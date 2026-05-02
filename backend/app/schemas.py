@@ -40,3 +40,14 @@ class SummaryOut(BaseModel):
     score_ranking: list[DistrictMetricOut]
     scatter: list[DistrictMetricOut]
     recommendations: list[DistrictMetricOut]
+
+
+class AIAdviceRequest(BaseModel):
+    district: str | None = None
+
+
+class AIAdviceOut(BaseModel):
+    district: str
+    prompt: str
+    advice: str
+    is_placeholder: bool = True

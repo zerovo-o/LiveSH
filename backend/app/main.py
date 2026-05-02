@@ -5,10 +5,11 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from .ai_advice import generate_ai_advice
 from .amap import fetch_shanghai_district_boundaries
 from .database import Base, engine, get_db
 from .models import DistrictMetric, PoiCategoryMetric
-from .schemas import DistrictMetricOut, PoiCategoryOut, SummaryOut
+from .schemas import AIAdviceOut, AIAdviceRequest, DistrictMetricOut, PoiCategoryOut, SummaryOut
 
 Base.metadata.create_all(bind=engine)
 
@@ -61,6 +62,24 @@ def summary(db: Session = Depends(get_db)):
 @app.get("/api/amap/shanghai-districts")
 def shanghai_district_boundaries() -> dict:
     return {"districts": fetch_shanghai_district_boundaries()}
+
+
+@app.post("/api/ai/advice", response_model=AIAdviceOut)
+def ai_advice(payload: AIAdviceRequest, db: Session = Depends(get_db)):
+    district = payload.district
+    if district:
+        metric = db.get(DistrictMetric, district)
+    else:
+        metric = db.scalars(select(DistrictMetric).order_by(DistrictMetric.livability_score.desc())).first()
+    if not metric:
+        raise HTTPException(status_code=404, detail="district not found")
+    prompt, advice, is_placeholder = generate_ai_advice(metric)
+    return {
+        "district": metric.district,
+        "prompt": prompt,
+        "advice": advice,
+        "is_placeholder": is_placeholder,
+    }
 
 
 def main() -> None:

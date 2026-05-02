@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { AlertCircle, ChevronsDown, MapPinned, RefreshCw, Sparkles } from "lucide-react";
+import AIAdvicePanel from "./components/AIAdvicePanel";
 import ChartsPanel from "./components/ChartsPanel";
 import MapPanel from "./components/MapPanel";
 import StatsPanel from "./components/StatsPanel";
@@ -71,17 +72,17 @@ function App() {
   }
 
   return (
-    <main className="min-h-screen px-4 py-6 text-[#33251f] md:px-8 xl:px-10">
-      <div className="mx-auto max-w-[1440px]">
-      <section className="relative mb-8 flex min-h-[calc(100vh-3rem)] overflow-hidden bg-[linear-gradient(180deg,rgba(255,248,235,0.98),rgba(255,232,208,0.86)_54%,rgba(220,248,238,0.72))] px-4 py-12 md:px-8 md:py-16">
+    <main className="min-h-screen text-[#33251f]">
+      <section className="relative flex min-h-screen overflow-hidden px-4 py-12 md:px-8 md:py-16">
         <div className="absolute right-[-8rem] top-[-9rem] h-80 w-80 rounded-full bg-[#ffb37d]/35 blur-3xl" />
-        <div className="absolute bottom-[-10rem] left-[-8rem] h-96 w-96 rounded-full bg-[#6bd0b5]/25 blur-3xl" />
+        <div className="absolute left-[-9rem] top-[12rem] h-80 w-80 rounded-full bg-[#6bd0b5]/18 blur-3xl" />
 
         <div className="relative z-10 mx-auto flex w-full max-w-5xl flex-col justify-between text-center">
           <div className="pt-4">
-            <h1 className="mx-auto max-w-5xl text-5xl font-semibold leading-tight tracking-tight text-[#33251f] md:text-7xl">
+            <h1 className="mx-auto max-w-5xl bg-[linear-gradient(105deg,#ff6b4a_0%,#ffb23f_34%,#20b486_66%,#2f80ed_100%)] bg-clip-text text-7xl font-black leading-none tracking-[-0.08em] text-transparent drop-shadow-[0_18px_36px_rgba(255,122,79,0.18)] md:text-9xl">
               LiveSH
             </h1>
+            <div className="mx-auto mt-3 h-2 w-40 rounded-full bg-[linear-gradient(90deg,#ff6b4a,#ffc85c,#28c19a,#5b8cff)] opacity-80" />
             <div className="mt-8 inline-flex items-center gap-2 rounded-full bg-white/38 px-4 py-2 text-base font-medium text-[#9a5a1d] backdrop-blur-sm">
                 <Sparkles className="h-4 w-4" />
                 让地图先回答：哪里住得更划算，也更方便
@@ -102,24 +103,25 @@ function App() {
                 <p>综合评分 = 标准化商圈活跃度 - 标准化房价</p>
                 <p>分数越高，代表生活便利性相对更强，同时居住成本压力相对更低</p>
               </div>
-              <div className="mx-auto mt-7 flex max-w-md justify-center gap-3 text-sm font-medium">
-                <div className="rounded-full bg-[#fff4df]/76 px-5 py-2 text-[#9a5a1d]">成本</div>
-                <div className="rounded-full bg-[#e8f7ef]/76 px-5 py-2 text-[#2e7d64]">便利</div>
-                <div className="rounded-full bg-[#fff0ea]/76 px-5 py-2 text-[#b25332]">评分</div>
+              <div className="mx-auto mt-8 flex max-w-2xl flex-wrap justify-center gap-4 text-2xl font-black md:text-4xl">
+                <div className="rounded-[1.35rem] bg-[#fff4df]/82 px-8 py-4 text-[#c06a1a] shadow-[0_14px_34px_rgba(192,106,26,0.12)]">成本</div>
+                <div className="rounded-[1.35rem] bg-[#e8f7ef]/82 px-8 py-4 text-[#23916f] shadow-[0_14px_34px_rgba(35,145,111,0.12)]">便利</div>
+                <div className="rounded-[1.35rem] bg-[#fff0ea]/82 px-8 py-4 text-[#d85435] shadow-[0_14px_34px_rgba(216,84,53,0.12)]">评分</div>
               </div>
           </div>
 
           <button
             type="button"
             onClick={() => document.getElementById("map-gis")?.scrollIntoView({ behavior: "smooth", block: "start" })}
-            className="mx-auto flex items-center justify-center text-[#b25332] transition hover:translate-y-1 hover:text-[#ff7a4f]"
+            className="mx-auto -mt-6 flex h-20 w-28 items-center justify-center text-[#b25332] transition hover:translate-y-1 hover:text-[#ff7a4f]"
             aria-label="进入地图 GIS"
           >
-            <ChevronsDown className="h-12 w-12" />
+            <ChevronsDown className="h-16 w-16 stroke-[2.8]" />
           </button>
         </div>
       </section>
 
+      <div className="mx-auto max-w-[1440px] px-4 pb-6 pt-4 md:px-8 xl:px-10">
       <section id="map-gis" className="mx-auto grid h-[calc(100vh-4rem)] min-h-[560px] max-w-[1360px] scroll-mt-5 grid-cols-1 gap-3 rounded-[22px] border border-[#ead8c2] bg-white/70 p-3 shadow-[0_24px_80px_rgba(104,72,42,0.12)] xl:grid-cols-[320px_minmax(0,1fr)]">
         <RecommendationSection
           recommendations={summary.score_ranking.slice(0, 5)}
@@ -152,6 +154,8 @@ function App() {
           selectedDistrict={selectedDistrict}
           onSelectDistrict={setSelectedDistrict}
         />
+
+        <AIAdvicePanel selected={selected} />
       </div>
       </div>
     </main>
