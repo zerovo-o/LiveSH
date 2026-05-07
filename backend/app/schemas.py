@@ -32,6 +32,30 @@ class PoiCategoryOut(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class StreetMetricOut(BaseModel):
+    id: int
+    district: str
+    street: str
+    avg_price: float
+    avg_total_price: float
+    house_count: int
+    poi_total: int
+    recreation_count: int
+    company_count: int
+    residence_count: int
+    shopping_count: int
+    traffic_count: int
+    healthcare_count: int
+    business_activity: float
+    activity_norm: float
+    price_norm: float
+    livability_score: float
+    center_lng: float | None = None
+    center_lat: float | None = None
+
+    model_config = {"from_attributes": True}
+
+
 class SummaryOut(BaseModel):
     districts: list[DistrictMetricOut]
     poi_categories: list[PoiCategoryOut]

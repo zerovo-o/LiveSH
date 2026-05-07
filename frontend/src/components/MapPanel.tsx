@@ -24,6 +24,12 @@ type DistrictBoundary = {
   center?: [number, number] | null;
   boundaries: Array<Array<[number, number]>>;
 };
+type StreetBoundary = {
+  name: string;
+  district: string;
+  center?: [number, number] | null;
+  boundaries: Array<Array<[number, number]>>;
+};
 
 const SHANGHAI_CENTER: [number, number] = [121.4737, 31.2304];
 
@@ -116,10 +122,18 @@ async function fetchBackendBoundaries(): Promise<DistrictBoundary[]> {
   return json.districts;
 }
 
+async function fetchStreetBoundaries(): Promise<StreetBoundary[]> {
+  const res = await fetch("/api/amap/shanghai-streets");
+  if (!res.ok) throw new Error("Backend street boundary request failed");
+  const json = (await res.json()) as { streets?: StreetBoundary[] };
+  return json.streets ?? [];
+}
+
 const MapPanel = memo(function MapPanel({ districts, selectedDistrict, recommendations, onSelectDistrict }: MapPanelProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<any>(null);
   const polygonsRef = useRef<Record<string, any[]>>({});
+  const streetPolygonsRef = useRef<any[]>([]);
   const markersRef = useRef<any[]>([]);
   const infoWindowRef = useRef<any>(null);
   const selectedDistrictRef = useRef<string | null>(selectedDistrict);
@@ -128,6 +142,7 @@ const MapPanel = memo(function MapPanel({ districts, selectedDistrict, recommend
   const [loading, setLoading] = useState(true);
   const [mapError, setMapError] = useState<string | null>(null);
   const [mapMode, setMapMode] = useState<MapMode>("score");
+  const [showStreetBoundaries, setShowStreetBoundaries] = useState(true);
 
   const metricByName = useMemo(() => {
     const map = new Map<string, DistrictMetric>();
@@ -215,44 +230,44 @@ const MapPanel = memo(function MapPanel({ districts, selectedDistrict, recommend
               return;
             }
             districtList.forEach((district) => {
-            const name = normalizeDistrictName(district.name);
-            const metric = metricByName.get(name);
-            if (!metric || !district.boundaries) return;
-            const polygons = district.boundaries.map((boundary: any) => {
-              const polygon = new AMap.Polygon({
-                path: boundary,
-                strokeColor: recommendationNames.has(name) ? "#0f766e" : "#334155",
-                strokeWeight: recommendationNames.has(name) ? 2.5 : 1,
-                strokeOpacity: 0.8,
-                fillColor: getModeColor(metric, mapModeRef.current),
-                fillOpacity: 0.62,
-                cursor: "pointer",
-                zIndex: recommendationNames.has(name) ? 14 : 10
+              const name = normalizeDistrictName(district.name);
+              const metric = metricByName.get(name);
+              if (!metric || !district.boundaries) return;
+              const polygons = district.boundaries.map((boundary: any) => {
+                const polygon = new AMap.Polygon({
+                  path: boundary,
+                  strokeColor: recommendationNames.has(name) ? "#0f766e" : "#334155",
+                  strokeWeight: recommendationNames.has(name) ? 2.5 : 1,
+                  strokeOpacity: 0.8,
+                  fillColor: getModeColor(metric, mapModeRef.current),
+                  fillOpacity: 0.62,
+                  cursor: "pointer",
+                  zIndex: recommendationNames.has(name) ? 14 : 10
+                });
+                polygon.on("click", () => onSelectDistrict(name));
+                polygon.on("mouseover", (event: any) => {
+                  const mode = mapModeRef.current;
+                  const config = mapModes[mode];
+                  polygon.setOptions({ fillOpacity: 0.82, strokeWeight: 2.5 });
+                  infoWindowRef.current?.setContent(
+                    `<div class="map-tooltip">
+                      <div class="map-tooltip-title">${name}</div>
+                      <div>${config.label}: <b>${config.format(config.value(metric))}${config.unit ? ` ${config.unit}` : ""}</b></div>
+                      <div>房价: <b>${Math.round(metric.avg_price).toLocaleString("zh-CN")} 元/㎡</b></div>
+                      <div>POI: <b>${metric.poi_total.toLocaleString("zh-CN")}</b></div>
+                      <div>宜居评分: <b>${metric.livability_score.toFixed(3)}</b></div>
+                    </div>`
+                  );
+                  infoWindowRef.current?.open(map, event.lnglat);
+                });
+                polygon.on("mouseout", () => {
+                  const active = selectedDistrictRef.current === name;
+                  polygon.setOptions({ fillOpacity: active ? 0.88 : 0.62, strokeWeight: active ? 3 : recommendationNames.has(name) ? 2.5 : 1 });
+                });
+                map.add(polygon);
+                return polygon;
               });
-              polygon.on("click", () => onSelectDistrict(name));
-              polygon.on("mouseover", (event: any) => {
-                const mode = mapModeRef.current;
-                const config = mapModes[mode];
-                polygon.setOptions({ fillOpacity: 0.82, strokeWeight: 2.5 });
-                infoWindowRef.current?.setContent(
-                  `<div class="map-tooltip">
-                    <div class="map-tooltip-title">${name}</div>
-                    <div>${config.label}: <b>${config.format(config.value(metric))}${config.unit ? ` ${config.unit}` : ""}</b></div>
-                    <div>房价: <b>${Math.round(metric.avg_price).toLocaleString("zh-CN")} 元/㎡</b></div>
-                    <div>POI: <b>${metric.poi_total.toLocaleString("zh-CN")}</b></div>
-                    <div>宜居评分: <b>${metric.livability_score.toFixed(3)}</b></div>
-                  </div>`
-                );
-                infoWindowRef.current?.open(map, event.lnglat);
-              });
-              polygon.on("mouseout", () => {
-                const active = selectedDistrictRef.current === name;
-                polygon.setOptions({ fillOpacity: active ? 0.88 : 0.62, strokeWeight: active ? 3 : recommendationNames.has(name) ? 2.5 : 1 });
-              });
-              map.add(polygon);
-              return polygon;
-            });
-            polygonsRef.current[name] = polygons;
+              polygonsRef.current[name] = polygons;
             });
             markersRef.current = districts
               .filter((item) => item.center_lng && item.center_lat)
@@ -272,7 +287,54 @@ const MapPanel = memo(function MapPanel({ districts, selectedDistrict, recommend
             setLoading(false);
           };
 
-          const fallbackDistrictSearch = () => {
+          const drawStreetBoundaries = (streetList: StreetBoundary[]) => {
+            if (cancelled || streetList.length === 0) return;
+            streetPolygonsRef.current.forEach((polygon) => map.remove(polygon));
+            streetPolygonsRef.current = streetList.flatMap((street) =>
+              street.boundaries.map((boundary: any) => {
+                const polygon = new AMap.Polygon({
+                  path: boundary,
+                  strokeColor: "#075985",
+                  strokeWeight: 1.1,
+                  strokeOpacity: 0.55,
+                  fillOpacity: 0,
+                  cursor: "default",
+                  zIndex: 36,
+                  extData: {
+                    district: street.district,
+                    street: street.name
+                  }
+                });
+                polygon.on("mouseover", (event: any) => {
+                  polygon.setOptions({ strokeOpacity: 0.95, strokeWeight: 2 });
+                  infoWindowRef.current?.setContent(
+                    `<div class="map-tooltip">
+                      <div class="map-tooltip-title">${street.district} · ${street.name}</div>
+                      <div>街道/镇边界</div>
+                    </div>`
+                  );
+                  infoWindowRef.current?.open(map, event.lnglat);
+                });
+                polygon.on("mouseout", () => {
+                  polygon.setOptions({ strokeOpacity: 0.55, strokeWeight: 1.1 });
+                });
+                if (showStreetBoundaries) map.add(polygon);
+                return polygon;
+              })
+            );
+          };
+
+          const loadBackendBoundaries = () => {
+            fetchBackendBoundaries()
+              .then(drawDistricts)
+              .catch(() => {
+                if (cancelled) return;
+                setMapError("行政区边界加载失败。高德官方边界与本地边界都不可用，请检查高德 Key 或本地边界文件。");
+                setLoading(false);
+              });
+          };
+
+          const loadOfficialDistrictBoundaries = () => {
             const districtSearch = new AMap.DistrictSearch({
               level: "district",
               subdistrict: 1,
@@ -280,15 +342,13 @@ const MapPanel = memo(function MapPanel({ districts, selectedDistrict, recommend
             });
             boundaryTimer = window.setTimeout(() => {
               if (cancelled) return;
-              setMapError("行政区边界加载超时，请检查高德 JS Key、安全密钥、域名白名单，或配置后端 AMAP_WEB_SERVICE_KEY。");
-              setLoading(false);
+              loadBackendBoundaries();
             }, 10000);
             districtSearch.search("上海市", (status: string, result: any) => {
               if (cancelled) return;
               if (boundaryTimer) window.clearTimeout(boundaryTimer);
               if (status !== "complete") {
-                setMapError("行政区边界加载失败。若你已使用 Web端(JS API) Key，请检查安全密钥、域名白名单；也可以在后端配置 AMAP_WEB_SERVICE_KEY。");
-                setLoading(false);
+                loadBackendBoundaries();
                 return;
               }
               const districtList = (result?.districtList?.[0]?.districtList ?? []).map((district: any) => ({
@@ -301,9 +361,8 @@ const MapPanel = memo(function MapPanel({ districts, selectedDistrict, recommend
             });
           };
 
-          fetchBackendBoundaries()
-            .then(drawDistricts)
-            .catch(fallbackDistrictSearch);
+          fetchStreetBoundaries().then(drawStreetBoundaries).catch(() => undefined);
+          loadOfficialDistrictBoundaries();
         } catch {
           setMapError("高德地图初始化失败，请检查 VITE_AMAP_KEY、VITE_AMAP_SECURITY_CODE 和浏览器控制台错误。");
           setLoading(false);
@@ -345,6 +404,18 @@ const MapPanel = memo(function MapPanel({ districts, selectedDistrict, recommend
     });
   }, [districts, mapMode, metricByName, recommendationNames, selectedDistrict]);
 
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+    streetPolygonsRef.current.forEach((polygon) => {
+      if (showStreetBoundaries) {
+        map.add(polygon);
+      } else {
+        map.remove(polygon);
+      }
+    });
+  }, [showStreetBoundaries]);
+
   return (
     <section className="relative h-full overflow-hidden rounded-lg border border-slate-200 bg-white shadow-soft">
       <div className="absolute right-4 top-4 z-20 rounded-lg border border-[#ead8c2]/70 bg-white/80 px-3 py-3 text-sm shadow-soft backdrop-blur-md">
@@ -382,6 +453,19 @@ const MapPanel = memo(function MapPanel({ districts, selectedDistrict, recommend
             <span>{modeStats.config.format(modeStats.min)}</span>
             <span>{modeStats.config.format(modeStats.max)}</span>
           </div>
+        </div>
+        <div className="mt-3 border-t border-[#ead8c2] pt-3">
+          <button
+            type="button"
+            onClick={() => setShowStreetBoundaries((value) => !value)}
+            className={`w-full rounded-full border px-2.5 py-1 text-xs font-medium transition ${
+              showStreetBoundaries
+                ? "border-[#7cc4a4] bg-[#ecfdf3] text-[#176b50]"
+                : "border-[#ead8c2] bg-white text-[#775f4d] hover:border-[#f3c99a] hover:bg-[#fff9ef]"
+            }`}
+          >
+            {showStreetBoundaries ? "隐藏街镇边界" : "显示街镇边界"}
+          </button>
         </div>
       </div>
 
