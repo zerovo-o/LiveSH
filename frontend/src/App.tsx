@@ -4,6 +4,7 @@ import AIAdvicePanel from "./components/AIAdvicePanel";
 import ChartsPanel from "./components/ChartsPanel";
 import MapPanel from "./components/MapPanel";
 import StatsPanel from "./components/StatsPanel";
+import StreetPanel from "./components/StreetPanel";
 import { Button } from "./components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "./components/ui/card";
 import { Badge } from "./components/ui/badge";
@@ -142,6 +143,12 @@ function App() {
         <StatsPanel
           selected={selected}
           districts={summary.score_ranking}
+          onSelectDistrict={setSelectedDistrict}
+        />
+
+        <StreetPanel
+          districts={summary.score_ranking}
+          selectedDistrict={selectedDistrict}
           onSelectDistrict={setSelectedDistrict}
         />
 

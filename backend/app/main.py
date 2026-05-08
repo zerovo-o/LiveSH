@@ -6,10 +6,10 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from .ai_advice import generate_ai_advice
-from .amap import fetch_shanghai_district_boundaries
+from .amap import fetch_local_shanghai_street_boundaries, fetch_shanghai_district_boundaries
 from .database import Base, engine, get_db
-from .models import DistrictMetric, PoiCategoryMetric
-from .schemas import AIAdviceOut, AIAdviceRequest, DistrictMetricOut, PoiCategoryOut, SummaryOut
+from .models import DistrictMetric, PoiCategoryMetric, StreetMetric
+from .schemas import AIAdviceOut, AIAdviceRequest, DistrictMetricOut, StreetMetricOut, SummaryOut
 
 Base.metadata.create_all(bind=engine)
 
@@ -41,6 +41,24 @@ def get_district(district: str, db: Session = Depends(get_db)):
     return item
 
 
+@app.get("/api/streets", response_model=list[StreetMetricOut])
+def list_streets(district: str | None = None, db: Session = Depends(get_db)):
+    statement = select(StreetMetric)
+    if district:
+        statement = statement.where(StreetMetric.district == district)
+    return db.scalars(statement.order_by(StreetMetric.livability_score.desc())).all()
+
+
+@app.get("/api/streets/{district}/{street}", response_model=StreetMetricOut)
+def get_street(district: str, street: str, db: Session = Depends(get_db)):
+    item = db.scalars(
+        select(StreetMetric).where(StreetMetric.district == district, StreetMetric.street == street)
+    ).first()
+    if not item:
+        raise HTTPException(status_code=404, detail="street not found")
+    return item
+
+
 @app.get("/api/summary", response_model=SummaryOut)
 def summary(db: Session = Depends(get_db)):
     districts = db.scalars(select(DistrictMetric)).all()
@@ -62,6 +80,11 @@ def summary(db: Session = Depends(get_db)):
 @app.get("/api/amap/shanghai-districts")
 def shanghai_district_boundaries() -> dict:
     return {"districts": fetch_shanghai_district_boundaries()}
+
+
+@app.get("/api/amap/shanghai-streets")
+def shanghai_street_boundaries() -> dict:
+    return {"streets": fetch_local_shanghai_street_boundaries()}
 
 
 @app.post("/api/ai/advice", response_model=AIAdviceOut)

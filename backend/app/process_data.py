@@ -11,7 +11,7 @@ from sqlalchemy import delete
 from .config import DATA_DIR
 from .database import Base, SessionLocal, engine
 from .geo import normalize_district, wgs84_to_gcj02
-from .models import DistrictMetric, HouseListing, PoiCategoryMetric, PoiPoint
+from .models import DistrictMetric, HouseListing, PoiCategoryMetric, PoiPoint, StreetMetric
 
 CATEGORY_BY_SOURCE = {
     "sh_shopping": "购物",
@@ -30,6 +30,8 @@ ACTIVITY_WEIGHTS = {
     "公司企业": 0.10,
 }
 
+STREET_BOUNDARY_PATH = DATA_DIR / "sh_street_boundary" / "shanghai_street_boundary.shp"
+
 
 def minmax(series: pd.Series) -> pd.Series:
     if series.empty:
@@ -39,6 +41,65 @@ def minmax(series: pd.Series) -> pd.Series:
     if hi == lo:
         return pd.Series([0.5] * len(series), index=series.index)
     return (series - lo) / (hi - lo)
+
+
+def point_in_ring(x: float, y: float, ring: list[tuple[float, float]]) -> bool:
+    inside = False
+    j = len(ring) - 1
+    for i, (xi, yi) in enumerate(ring):
+        xj, yj = ring[j]
+        intersects = (yi > y) != (yj > y) and x < (xj - xi) * (y - yi) / ((yj - yi) or 1e-12) + xi
+        if intersects:
+            inside = not inside
+        j = i
+    return inside
+
+
+def point_in_shape(x: float, y: float, shape: shapefile.Shape) -> bool:
+    xmin, ymin, xmax, ymax = shape.bbox
+    if not (xmin <= x <= xmax and ymin <= y <= ymax):
+        return False
+    points = shape.points
+    parts = list(shape.parts) + [len(points)]
+    for start, end in zip(parts, parts[1:]):
+        ring = points[start:end]
+        if len(ring) >= 3 and point_in_ring(x, y, ring):
+            return True
+    return False
+
+
+def load_street_shapes(path: Path = STREET_BOUNDARY_PATH) -> list[dict]:
+    if not path.exists():
+        return []
+    reader = shapefile.Reader(str(path), encoding="utf-8")
+    streets: list[dict] = []
+    for shape_record in reader.iterShapeRecords():
+        record = shape_record.record.as_dict()
+        street = str(record.get("STREET") or "").strip()
+        district = normalize_district(record.get("AREA"))
+        if street:
+            streets.append({"district": district, "street": street, "shape": shape_record.shape})
+    return streets
+
+
+def locate_street(lng: float | None, lat: float | None, streets: list[dict]) -> tuple[str, str] | None:
+    if lng is None or lat is None:
+        return None
+    for item in streets:
+        if point_in_shape(float(lng), float(lat), item["shape"]):
+            return item["district"], item["street"]
+    return None
+
+
+def assign_streets(rows: pd.DataFrame, streets: list[dict]) -> pd.DataFrame:
+    if not streets or rows.empty:
+        rows["street"] = None
+        return rows
+    results = [locate_street(float(row.wgs84_lng), float(row.wgs84_lat), streets) for row in rows.itertuples(index=False)]
+    rows = rows.copy()
+    rows["street"] = [item[1] if item else None for item in results]
+    rows["district"] = [item[0] if item else district for item, district in zip(results, rows["district"])]
+    return rows
 
 
 def load_house_rows(path: Path) -> pd.DataFrame:
@@ -140,21 +201,71 @@ def build_metrics(houses: pd.DataFrame, pois: pd.DataFrame) -> tuple[pd.DataFram
     return metrics, category_counts
 
 
+def build_street_metrics(houses: pd.DataFrame, pois: pd.DataFrame) -> pd.DataFrame:
+    houses = houses.dropna(subset=["street"])
+    pois = pois.dropna(subset=["street"])
+    if houses.empty:
+        return pd.DataFrame()
+
+    group_cols = ["district", "street"]
+    house_agg = houses.groupby(group_cols).agg(
+        avg_price=("unit_price", "mean"),
+        avg_total_price=("price", "mean"),
+        house_count=("house_id", "count"),
+        center_lng=("gcj02_lng", "mean"),
+        center_lat=("gcj02_lat", "mean"),
+    )
+    poi_pivot = (
+        pois.pivot_table(index=group_cols, columns="category", values="name", aggfunc="count", fill_value=0)
+        if not pois.empty
+        else pd.DataFrame()
+    )
+    for category in CATEGORY_BY_SOURCE.values():
+        if category not in poi_pivot.columns:
+            poi_pivot[category] = 0
+    poi_pivot["poi_total"] = poi_pivot[list(CATEGORY_BY_SOURCE.values())].sum(axis=1)
+    metrics = house_agg.join(poi_pivot, how="left").fillna(0)
+    metrics["business_activity"] = sum(metrics.get(cat, 0) * weight for cat, weight in ACTIVITY_WEIGHTS.items())
+    metrics["activity_norm"] = minmax(metrics["business_activity"])
+    metrics["price_norm"] = minmax(metrics["avg_price"])
+    metrics["livability_score"] = metrics["activity_norm"] - metrics["price_norm"]
+    return metrics.reset_index().rename(
+        columns={
+            "购物": "shopping_count",
+            "医疗": "healthcare_count",
+            "交通": "traffic_count",
+            "休闲娱乐": "recreation_count",
+            "公司企业": "company_count",
+            "住宅": "residence_count",
+        }
+    )
+
+
 def ingest(data_dir: Path = DATA_DIR) -> None:
+    Base.metadata.drop_all(bind=engine)
     Base.metadata.create_all(bind=engine)
+    street_shapes = load_street_shapes(data_dir / "sh_street_boundary" / "shanghai_street_boundary.shp")
     houses = load_house_rows(data_dir / "sh_house_dataset_raw.parquet")
     pois = pd.DataFrame(iter_poi_rows(data_dir / "sh_poi_raw"))
+    houses = assign_streets(houses, street_shapes)
+    pois = assign_streets(pois, street_shapes)
     metrics, category_counts = build_metrics(houses, pois)
+    street_metrics = build_street_metrics(houses, pois)
 
     with SessionLocal.begin() as db:
-        for table in [HouseListing, PoiPoint, DistrictMetric, PoiCategoryMetric]:
+        for table in [HouseListing, PoiPoint, DistrictMetric, StreetMetric, PoiCategoryMetric]:
             db.execute(delete(table))
         db.bulk_insert_mappings(HouseListing, houses.to_dict(orient="records"))
         db.bulk_insert_mappings(PoiPoint, pois.to_dict(orient="records"))
         db.bulk_insert_mappings(DistrictMetric, metrics.to_dict(orient="records"))
+        if not street_metrics.empty:
+            db.bulk_insert_mappings(StreetMetric, street_metrics.to_dict(orient="records"))
         db.bulk_insert_mappings(PoiCategoryMetric, category_counts.to_dict(orient="records"))
 
-    print(f"ingested houses={len(houses)} pois={len(pois)} districts={len(metrics)}")
+    print(
+        f"ingested houses={len(houses)} pois={len(pois)} "
+        f"districts={len(metrics)} streets={len(street_metrics)}"
+    )
 
 
 def main() -> None:

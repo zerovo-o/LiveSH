@@ -23,6 +23,11 @@ export type PoiCategory = {
   count: number;
 };
 
+export type StreetMetric = DistrictMetric & {
+  id: number;
+  street: string;
+};
+
 export type Summary = {
   districts: DistrictMetric[];
   poi_categories: PoiCategory[];

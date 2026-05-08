@@ -12,6 +12,7 @@ class HouseListing(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     house_id: Mapped[str | None] = mapped_column(String(80), index=True)
     district: Mapped[str] = mapped_column(String(32), index=True)
+    street: Mapped[str | None] = mapped_column(String(64), index=True)
     price: Mapped[float] = mapped_column(Float)
     unit_price: Mapped[float] = mapped_column(Float)
     wgs84_lng: Mapped[float] = mapped_column(Float)
@@ -29,6 +30,7 @@ class PoiPoint(Base):
     category: Mapped[str] = mapped_column(String(24), index=True)
     source: Mapped[str] = mapped_column(String(64), index=True)
     district: Mapped[str] = mapped_column(String(32), index=True)
+    street: Mapped[str | None] = mapped_column(String(64), index=True)
     tag: Mapped[str | None] = mapped_column(String(160))
     wgs84_lng: Mapped[float | None] = mapped_column(Float)
     wgs84_lat: Mapped[float | None] = mapped_column(Float)
@@ -40,6 +42,30 @@ class DistrictMetric(Base):
     __tablename__ = "district_metrics"
 
     district: Mapped[str] = mapped_column(String(32), primary_key=True)
+    avg_price: Mapped[float] = mapped_column(Float)
+    avg_total_price: Mapped[float] = mapped_column(Float)
+    house_count: Mapped[int] = mapped_column(Integer)
+    poi_total: Mapped[int] = mapped_column(Integer)
+    recreation_count: Mapped[int] = mapped_column(Integer)
+    company_count: Mapped[int] = mapped_column(Integer)
+    residence_count: Mapped[int] = mapped_column(Integer)
+    shopping_count: Mapped[int] = mapped_column(Integer)
+    traffic_count: Mapped[int] = mapped_column(Integer)
+    healthcare_count: Mapped[int] = mapped_column(Integer)
+    business_activity: Mapped[float] = mapped_column(Float)
+    activity_norm: Mapped[float] = mapped_column(Float)
+    price_norm: Mapped[float] = mapped_column(Float)
+    livability_score: Mapped[float] = mapped_column(Float, index=True)
+    center_lng: Mapped[float | None] = mapped_column(Float)
+    center_lat: Mapped[float | None] = mapped_column(Float)
+
+
+class StreetMetric(Base):
+    __tablename__ = "street_metrics"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    district: Mapped[str] = mapped_column(String(32), index=True)
+    street: Mapped[str] = mapped_column(String(64), index=True)
     avg_price: Mapped[float] = mapped_column(Float)
     avg_total_price: Mapped[float] = mapped_column(Float)
     house_count: Mapped[int] = mapped_column(Integer)

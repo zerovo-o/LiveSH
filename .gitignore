@@ -168,3 +168,6 @@ data/sh_poi_raw/sh_recreation/
 data/sh_poi_raw/sh_residence/
 data/sh_poi_raw/sh_shopping/
 data/sh_poi_raw/sh_traffic facility/
+
+# Python packaging artifacts
+*.egg-info/
