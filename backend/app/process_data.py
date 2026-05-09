@@ -109,6 +109,9 @@ def build_metrics(houses: pd.DataFrame, pois: pd.DataFrame) -> tuple[pd.DataFram
         center_lng=("gcj02_lng", "mean"),
         center_lat=("gcj02_lat", "mean"),
     )
+    if pois.empty:
+        # Keep downstream logic stable when optional POI raw data is missing.
+        pois = pd.DataFrame(columns=["district", "category", "name"])
     poi_pivot = (
         pois.pivot_table(index="district", columns="category", values="name", aggfunc="count", fill_value=0)
         if not pois.empty

@@ -3,6 +3,7 @@ import { AlertCircle, ChevronsDown, MapPinned, RefreshCw, Sparkles } from "lucid
 import AIAdvicePanel from "./components/AIAdvicePanel";
 import ChartsPanel from "./components/ChartsPanel";
 import MapPanel from "./components/MapPanel";
+import PersonalizedAgentPanel from "./components/PersonalizedAgentPanel";
 import StatsPanel from "./components/StatsPanel";
 import { Button } from "./components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "./components/ui/card";
@@ -122,7 +123,7 @@ function App() {
       </section>
 
       <div className="mx-auto max-w-[1440px] px-4 pb-6 pt-4 md:px-8 xl:px-10">
-      <section id="map-gis" className="mx-auto grid h-[calc(100vh-4rem)] min-h-[560px] max-w-[1360px] scroll-mt-5 grid-cols-1 gap-3 rounded-[22px] border border-[#ead8c2] bg-white/70 p-3 shadow-[0_24px_80px_rgba(104,72,42,0.12)] xl:grid-cols-[320px_minmax(0,1fr)]">
+      <section id="map-gis" className="mx-auto grid h-[calc(100vh-4rem)] min-h-[560px] max-w-[1360px] scroll-mt-5 grid-cols-1 gap-3 rounded-[22px] border border-[#ead8c2] bg-white/70 p-3 shadow-[0_24px_80px_rgba(104,72,42,0.12)] xl:grid-cols-[300px_minmax(0,1fr)_360px]">
         <RecommendationSection
           recommendations={summary.score_ranking.slice(0, 5)}
           onSelectDistrict={setSelectedDistrict}
@@ -136,6 +137,7 @@ function App() {
             onSelectDistrict={setSelectedDistrict}
           />
         </div>
+        <PersonalizedAgentPanel />
       </section>
 
       <div className="mt-5 space-y-5">
