@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pandas as pd
 import shapefile
+from sqlalchemy import text
 from sqlalchemy import delete
 
 from .config import DATA_DIR
@@ -43,7 +44,18 @@ def minmax(series: pd.Series) -> pd.Series:
 
 def load_house_rows(path: Path) -> pd.DataFrame:
     df = pd.read_parquet(path)
-    cols = ["house_id", "district", "listing_total_price", "listing_unit_price", "longitude", "latitude"]
+    cols = [
+        "house_id",
+        "district",
+        "sub_district",
+        "community_name",
+        "title",
+        "area",
+        "listing_total_price",
+        "listing_unit_price",
+        "longitude",
+        "latitude",
+    ]
     df = df[cols].rename(
         columns={
             "listing_total_price": "price",
@@ -55,6 +67,9 @@ def load_house_rows(path: Path) -> pd.DataFrame:
     df = df.dropna(subset=["district", "price", "unit_price", "wgs84_lng", "wgs84_lat"])
     df = df.drop_duplicates(subset=["house_id"])
     df["district"] = df["district"].map(normalize_district)
+    df["sub_district"] = df["sub_district"].fillna("").astype(str).str.strip().replace("", "未知")
+    df["community_name"] = df["community_name"].fillna("").astype(str).str.strip()
+    df["title"] = df["title"].fillna("").astype(str).str.strip()
     df = df[(df["wgs84_lng"].between(120.5, 122.2)) & (df["wgs84_lat"].between(30.5, 31.9))]
     gcj = df.apply(lambda r: wgs84_to_gcj02(float(r["wgs84_lng"]), float(r["wgs84_lat"])), axis=1)
     df["gcj02_lng"] = [item[0] for item in gcj]
@@ -145,6 +160,7 @@ def build_metrics(houses: pd.DataFrame, pois: pd.DataFrame) -> tuple[pd.DataFram
 
 def ingest(data_dir: Path = DATA_DIR) -> None:
     Base.metadata.create_all(bind=engine)
+    _ensure_house_listing_columns()
     houses = load_house_rows(data_dir / "sh_house_dataset_raw.parquet")
     pois = pd.DataFrame(iter_poi_rows(data_dir / "sh_poi_raw"))
     metrics, category_counts = build_metrics(houses, pois)
@@ -158,6 +174,25 @@ def ingest(data_dir: Path = DATA_DIR) -> None:
         db.bulk_insert_mappings(PoiCategoryMetric, category_counts.to_dict(orient="records"))
 
     print(f"ingested houses={len(houses)} pois={len(pois)} districts={len(metrics)}")
+
+
+def _ensure_house_listing_columns() -> None:
+    # Lightweight sqlite migration for newly introduced nullable columns.
+    required_columns = {
+        "sub_district": "VARCHAR(64)",
+        "community_name": "VARCHAR(120)",
+        "title": "VARCHAR(240)",
+        "area": "FLOAT",
+    }
+    with engine.begin() as conn:
+        dialect_name = engine.dialect.name
+        if dialect_name != "sqlite":
+            return
+        table_info = conn.execute(text("PRAGMA table_info('house_listings')")).fetchall()
+        existing = {row[1] for row in table_info}
+        for column, col_type in required_columns.items():
+            if column not in existing:
+                conn.execute(text(f"ALTER TABLE house_listings ADD COLUMN {column} {col_type}"))
 
 
 def main() -> None:

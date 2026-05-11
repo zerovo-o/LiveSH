@@ -9,8 +9,10 @@ from .ai_advice import generate_ai_advice
 from .agent_schemas import AgentRecommendRequest, AgentRecommendResponse
 from .amap import fetch_shanghai_district_boundaries
 from .database import Base, engine, get_db
+from .house_recommend_schemas import HouseRecommendRequest, HouseRecommendResponse
 from .models import DistrictMetric, PoiCategoryMetric
 from .recommend_agent import recommend_districts
+from .recommend_houses import recommend_houses
 from .schemas import AIAdviceOut, AIAdviceRequest, DistrictMetricOut, PoiCategoryOut, SummaryOut
 
 Base.metadata.create_all(bind=engine)
@@ -87,6 +89,11 @@ def ai_advice(payload: AIAdviceRequest, db: Session = Depends(get_db)):
 @app.post("/api/agent/recommend", response_model=AgentRecommendResponse)
 def agent_recommend(payload: AgentRecommendRequest, db: Session = Depends(get_db)):
     return recommend_districts(payload, db)
+
+
+@app.post("/api/agent/recommend-houses", response_model=HouseRecommendResponse)
+def agent_recommend_houses(payload: HouseRecommendRequest, db: Session = Depends(get_db)):
+    return recommend_houses(payload, db)
 
 
 def main() -> None:
