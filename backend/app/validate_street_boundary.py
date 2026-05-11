@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from pathlib import Path
 
 import pandas as pd
 import shapefile
@@ -8,6 +7,7 @@ import shapefile
 from .config import DATA_DIR
 from .geo import normalize_district
 from .process_data import iter_poi_rows
+from .amap import geocode_shanghai_community_wgs84
 
 
 BOUNDARY_PATH = DATA_DIR / "sh_street_boundary" / "shanghai_street_boundary.shp"
@@ -59,18 +59,35 @@ def locate_street(lng: float, lat: float, streets: list[dict]) -> tuple[str, str
 
 
 def validate_houses(streets: list[dict], limit: int = 300) -> None:
-    houses = pd.read_parquet(DATA_DIR / "sh_house_dataset_raw.parquet").dropna(
-        subset=["longitude", "latitude", "district"]
+    csv_path = DATA_DIR / "anjuke17w" / "dataset.csv"
+    if not csv_path.exists():
+        raise SystemExit(f"house dataset CSV not found: {csv_path}")
+
+    df = pd.read_csv(csv_path, encoding="utf-8-sig", usecols=["区", "街道", "小区"]).rename(
+        columns={"区": "district", "街道": "street", "小区": "community"}
     )
+    df["district"] = df["district"].map(normalize_district)
+    df["street"] = df["street"].map(lambda v: str(v or "").strip())
+    df["community"] = df["community"].map(lambda v: str(v or "").strip())
+    df = df.dropna(subset=["district", "community"]).reset_index(drop=True)
+
     matched = 0
     samples: list[tuple[str, str, str]] = []
-    for row in houses.head(limit).itertuples(index=False):
-        result = locate_street(float(row.longitude), float(row.latitude), streets)
+    total = min(limit, len(df))
+    for row in df.head(limit).itertuples(index=False):
+        try:
+            geocoded = geocode_shanghai_community_wgs84(row.district, row.street, row.community)
+        except RuntimeError as exc:
+            raise SystemExit(str(exc))
+        if not geocoded:
+            continue
+        gcj_lng, gcj_lat, wgs_lng, wgs_lat = geocoded
+        result = locate_street(float(gcj_lng), float(gcj_lat), streets)
         if result:
             matched += 1
             if len(samples) < 8:
-                samples.append((normalize_district(row.district), result[0], result[1]))
-    print(f"houses matched={matched}/{min(limit, len(houses))}")
+                samples.append((row.district, result[0], result[1]))
+    print(f"houses matched={matched}/{total}")
     for source_district, district, street in samples:
         print(f"  house district={source_district} -> {district} / {street}")
 

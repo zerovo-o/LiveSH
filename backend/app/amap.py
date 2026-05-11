@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import json
+import os
+import time
+import random
 from functools import lru_cache
 from urllib.parse import urlencode
 from urllib.request import urlopen
@@ -10,10 +13,21 @@ from fastapi import HTTPException
 
 from .config import DATA_DIR
 from .config import AMAP_WEB_SERVICE_KEY
-from .geo import normalize_district, wgs84_to_gcj02
+from .geo import gcj02_to_wgs84, normalize_district, wgs84_to_gcj02
 
 AMAP_DISTRICT_URL = "https://restapi.amap.com/v3/config/district"
+AMAP_GEOCODE_URL = "https://restapi.amap.com/v3/geocode/geo"
 LOCAL_STREET_BOUNDARY_PATH = DATA_DIR / "sh_street_boundary" / "shanghai_street_boundary.shp"
+
+# retry/backoff settings for AMap requests
+try:
+    AMAP_MAX_RETRIES = int(os.getenv("AMAP_MAX_RETRIES", "3"))
+except Exception:
+    AMAP_MAX_RETRIES = 3
+try:
+    AMAP_BACKOFF_BASE = float(os.getenv("AMAP_BACKOFF_BASE", "0.5"))
+except Exception:
+    AMAP_BACKOFF_BASE = 0.5
 
 
 def _parse_boundary(polyline: str) -> list[list[list[float]]]:
@@ -42,6 +56,100 @@ def _shape_to_gcj02_boundaries(shape: shapefile.Shape) -> list[list[list[float]]
         if len(ring) >= 3:
             boundaries.append(ring)
     return boundaries
+
+
+def _normalize_text(value: object) -> str:
+    return str(value or "").strip()
+
+
+def _build_geocode_queries(district: object = "", street: object = "", community: object = "") -> list[str]:
+    district_text = _normalize_text(district)
+    street_text = _normalize_text(street)
+    community_text = _normalize_text(community)
+    queries: list[str] = []
+
+    for parts in (
+        ["上海市", district_text, street_text, community_text],
+        ["上海市", district_text, community_text],
+        ["上海市", district_text],
+        ["上海市", community_text],
+        [district_text, street_text, community_text],
+        [district_text, community_text],
+        [district_text],
+        [community_text],
+    ):
+        query = "".join(part for part in parts if part)
+        if query and query not in queries:
+            queries.append(query)
+    return queries
+
+
+def _amap_json(url: str, params: dict[str, object]) -> dict:
+    query = urlencode({key: value for key, value in params.items() if value not in (None, "")})
+    with urlopen(f"{url}?{query}", timeout=12) as response:
+        return json.loads(response.read().decode("utf-8"))
+
+
+def _parse_location(value: str | None) -> tuple[float, float] | None:
+    if not value or "," not in value:
+        return None
+    lng_text, lat_text = value.split(",", 1)
+    try:
+        return float(lng_text), float(lat_text)
+    except ValueError:
+        return None
+
+
+@lru_cache(maxsize=8192)
+def geocode_shanghai_community(district: str, street: str, community: str) -> tuple[float, float] | None:
+    if not AMAP_WEB_SERVICE_KEY:
+        raise RuntimeError("AMap web service key is not configured; set AMAP_WEB_SERVICE_KEY in backend/.env")
+
+    for query in _build_geocode_queries(district, street, community):
+        # call AMap geocode with retry + exponential backoff on transient errors
+        payload = None
+        params = {
+            "key": AMAP_WEB_SERVICE_KEY,
+            "city": "上海市",
+            "address": query,
+            "batch": "false",
+            "roadlevel": "0",
+        }
+        for attempt in range(AMAP_MAX_RETRIES):
+            try:
+                payload = _amap_json(AMAP_GEOCODE_URL, params)
+                break
+            except Exception as exc:
+                # last attempt -> give up on this query
+                if attempt == AMAP_MAX_RETRIES - 1:
+                    # log a warning and continue to next candidate
+                    print(f"warning: AMap geocode failed for query='{query}' after {AMAP_MAX_RETRIES} attempts: {exc}")
+                    payload = None
+                    break
+                # otherwise back off and retry
+                sleep = AMAP_BACKOFF_BASE * (2 ** attempt) + random.uniform(0, 0.1)
+                time.sleep(sleep)
+                continue
+        if not payload or payload.get("status") != "1":
+            continue
+        geocodes = payload.get("geocodes") or []
+        for item in geocodes:
+            location = _parse_location(item.get("location"))
+            if location:
+                gcj_lng, gcj_lat = location
+                if 120.5 <= gcj_lng <= 122.2 and 30.5 <= gcj_lat <= 31.9:
+                    return gcj_lng, gcj_lat
+    return None
+
+
+def geocode_shanghai_community_wgs84(district: str, street: str, community: str) -> tuple[float, float, float, float] | None:
+    gcj_location = geocode_shanghai_community(district, street, community)
+    if not gcj_location:
+        print(f"[Warning]: gcj_location from {district}, {street}, {community} is empty, returning None")
+        return None
+    gcj_lng, gcj_lat = gcj_location
+    wgs_lng, wgs_lat = gcj02_to_wgs84(gcj_lng, gcj_lat)
+    return gcj_lng, gcj_lat, wgs_lng, wgs_lat
 
 
 @lru_cache(maxsize=1)

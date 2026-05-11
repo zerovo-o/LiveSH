@@ -33,7 +33,11 @@ LiveSH/
 
 ## 数据与坐标约定
 
-房价数据来自 `data/sh_house_dataset_raw.parquet`，后端读取 `longitude/latitude` 后按 WGS84 处理，并转换生成 GCJ-02 坐标。
+房价数据来自 `data/anjuke17w/dataset.csv`。后端会读取小区名、区名和街道名，通过高德 Web 服务 API 地理编码补齐坐标，并同时保存：
+
+- GCJ-02 坐标：高德地图可直接使用
+- WGS84 坐标：用于对照和数据分析
+
 
 POI 数据来自 `data/sh_poi_raw/` 下的 shapefile，类别包括：
 

@@ -1,14 +1,17 @@
 from __future__ import annotations
 
 import argparse
-from collections import Counter
+import json
+import os
+import time
 from pathlib import Path
 
 import pandas as pd
 import shapefile
 from sqlalchemy import delete
 
-from .config import DATA_DIR
+from .amap import geocode_shanghai_community_wgs84
+from .config import BACKEND_DIR, DATA_DIR
 from .database import Base, SessionLocal, engine
 from .geo import normalize_district, wgs84_to_gcj02
 from .models import DistrictMetric, HouseListing, PoiCategoryMetric, PoiPoint, StreetMetric
@@ -31,6 +34,39 @@ ACTIVITY_WEIGHTS = {
 }
 
 STREET_BOUNDARY_PATH = DATA_DIR / "sh_street_boundary" / "shanghai_street_boundary.shp"
+HOUSE_DATASET_CSV_PATH = DATA_DIR / "anjuke17w" / "dataset.csv"
+HOUSE_GEOCODE_CACHE_PATH = BACKEND_DIR / "data"/ ".cache" / "house_geocode_cache.json"
+GEOCODE_SAVE_INTERVAL = 60
+
+
+def _clean_text(value: object) -> str:
+    return str(value or "").strip()
+
+
+def _load_geocode_cache(path: Path) -> dict[str, list[float] | None]:
+    if not path.exists():
+        return {}
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return {}
+    return {str(key): value for key, value in payload.items() if isinstance(key, str)}
+
+
+def _save_geocode_cache(path: Path, cache: dict[str, list[float] | None]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    # write atomically: write to a temp file then replace
+    tmp_path = path.with_suffix(path.suffix + ".tmp")
+    tmp_path.write_text(json.dumps(cache, ensure_ascii=False, indent=2), encoding="utf-8")
+    try:
+        os.replace(str(tmp_path), str(path))
+    except Exception:
+        # fallback to direct write
+        path.write_text(json.dumps(cache, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def _geocode_cache_key(district: object, street: object, community: object) -> str:
+    return "\x1f".join((_clean_text(district), _clean_text(street), _clean_text(community)))
 
 
 def minmax(series: pd.Series) -> pd.Series:
@@ -103,24 +139,78 @@ def assign_streets(rows: pd.DataFrame, streets: list[dict]) -> pd.DataFrame:
 
 
 def load_house_rows(path: Path) -> pd.DataFrame:
-    df = pd.read_parquet(path)
-    cols = ["house_id", "district", "listing_total_price", "listing_unit_price", "longitude", "latitude"]
-    df = df[cols].rename(
+    # Only CSV input is supported now. CSV must contain: 标题, 区, 街道, 小区, 小区均价, 价格
+    if not path.exists():
+        raise SystemExit(f"house dataset CSV not found: {path}")
+    if path.suffix.lower() != ".csv":
+        raise SystemExit(f"Unsupported house dataset format: {path}. Expected a CSV file.")
+
+    df = pd.read_csv(path, encoding="utf-8-sig", usecols=["标题", "区", "街道", "小区", "小区均价", "价格"])
+    df = df.rename(
         columns={
-            "listing_total_price": "price",
-            "listing_unit_price": "unit_price",
-            "longitude": "wgs84_lng",
-            "latitude": "wgs84_lat",
+            "标题": "title",
+            "区": "district",
+            "街道": "street",
+            "小区": "community",
+            "小区均价": "unit_price",
+            "价格": "price",
         }
     )
-    df = df.dropna(subset=["district", "price", "unit_price", "wgs84_lng", "wgs84_lat"])
-    df = df.drop_duplicates(subset=["house_id"])
     df["district"] = df["district"].map(normalize_district)
-    df = df[(df["wgs84_lng"].between(120.5, 122.2)) & (df["wgs84_lat"].between(30.5, 31.9))]
-    gcj = df.apply(lambda r: wgs84_to_gcj02(float(r["wgs84_lng"]), float(r["wgs84_lat"])), axis=1)
-    df["gcj02_lng"] = [item[0] for item in gcj]
-    df["gcj02_lat"] = [item[1] for item in gcj]
-    return df
+    df["street"] = df["street"].map(_clean_text)
+    df["community"] = df["community"].map(_clean_text)
+    df["title"] = df["title"].map(_clean_text)
+    df["price"] = pd.to_numeric(df["price"], errors="coerce")
+    df["unit_price"] = pd.to_numeric(df["unit_price"], errors="coerce")
+    df = df.dropna(subset=["district", "community", "price", "unit_price"])
+    df = df[(df["district"] != "上海周边") & (df["district"] != "未知")]
+    df = df[df["community"] != ""]
+    df = df.reset_index(drop=True)
+    df["house_id"] = [f"dataset-{index + 1}" for index in range(len(df))]
+    return df[["house_id", "title", "district", "street", "community", "price", "unit_price"]]
+
+
+def geocode_house_rows(rows: pd.DataFrame, cache_path: Path = HOUSE_GEOCODE_CACHE_PATH) -> pd.DataFrame:
+    if rows.empty:
+        raise ValueError("Input DataFrame is empty, cannot perform geocoding.")
+
+    cache = _load_geocode_cache(cache_path)
+    geocode_map: dict[str, tuple[float, float, float, float]] = {}
+    unique_targets = rows[["district", "street", "community"]].drop_duplicates().reset_index(drop=True)
+    total = len(unique_targets)
+
+    last_save = time.time()
+    for index, target in enumerate(unique_targets.itertuples(index=False), start=1):
+        key = _geocode_cache_key(target.district, target.street, target.community)
+        cached = cache.get(key, "__missing__")
+        if cached != "__missing__":
+            result = tuple(cached) if cached else None
+        else:
+            result = geocode_shanghai_community_wgs84(str(target.district), str(target.street), str(target.community))
+            cache[key] = list(result) if result else None
+            # persist cache periodically (every GEOCODE_SAVE_INTERVAL seconds)
+            now = time.time()
+            if now - last_save >= GEOCODE_SAVE_INTERVAL:
+                _save_geocode_cache(cache_path, cache)
+                last_save = now
+
+        if result:
+            geocode_map[key] = result
+        if index % 500 == 0 or index == total:
+            print(f"geocoded communities {index}/{total} (success={len(geocode_map)})")
+
+    _save_geocode_cache(cache_path, cache)
+
+    rows = rows.copy()
+    rows["geocode_key"] = (rows["district"].map(_clean_text) + "\x1f" + rows["street"].map(_clean_text) + "\x1f" + rows[
+        "community"].map(_clean_text))
+    lookups = rows["geocode_key"].map(lambda key: geocode_map.get(key, (None, None, None, None)))
+    rows[["gcj02_lng", "gcj02_lat", "wgs84_lng", "wgs84_lat"]] = pd.DataFrame(lookups.tolist(), index=rows.index)
+    for column in ["gcj02_lng", "gcj02_lat", "wgs84_lng", "wgs84_lat"]:
+        rows[column] = pd.to_numeric(rows[column], errors="coerce")
+    rows = rows.dropna(subset=["gcj02_lng", "gcj02_lat", "wgs84_lng", "wgs84_lat"])
+    rows = rows[(rows["gcj02_lng"].between(120.5, 122.2)) & (rows["gcj02_lat"].between(30.5, 31.9))]
+    return rows.drop(columns=["geocode_key"])
 
 
 def iter_poi_rows(raw_dir: Path):
@@ -179,7 +269,8 @@ def build_metrics(houses: pd.DataFrame, pois: pd.DataFrame) -> tuple[pd.DataFram
         if category not in poi_pivot.columns:
             poi_pivot[category] = 0
     poi_pivot["poi_total"] = poi_pivot[list(CATEGORY_BY_SOURCE.values())].sum(axis=1)
-    metrics = house_agg.join(poi_pivot, how="left").fillna(0)
+    metrics = pd.concat([house_agg, poi_pivot], axis=1).fillna(0)
+    metrics.index = metrics.index.set_names(house_agg.index.names)
     metrics["business_activity"] = sum(metrics.get(cat, 0) * weight for cat, weight in ACTIVITY_WEIGHTS.items())
     metrics["activity_norm"] = minmax(metrics["business_activity"])
     metrics["price_norm"] = minmax(metrics["avg_price"])
@@ -195,9 +286,10 @@ def build_metrics(houses: pd.DataFrame, pois: pd.DataFrame) -> tuple[pd.DataFram
             "住宅": "residence_count",
         }
     )
-    category_counts = pd.DataFrame(
-        [{"category": category, "count": count} for category, count in Counter(pois["category"]).items()]
-    )
+    if pois.empty:
+        category_counts = pd.DataFrame(columns=["category", "count"])
+    else:
+        category_counts = pois.groupby("category").size().reset_index(name="count")
     return metrics, category_counts
 
 
@@ -224,7 +316,8 @@ def build_street_metrics(houses: pd.DataFrame, pois: pd.DataFrame) -> pd.DataFra
         if category not in poi_pivot.columns:
             poi_pivot[category] = 0
     poi_pivot["poi_total"] = poi_pivot[list(CATEGORY_BY_SOURCE.values())].sum(axis=1)
-    metrics = house_agg.join(poi_pivot, how="left").fillna(0)
+    metrics = pd.concat([house_agg, poi_pivot], axis=1).fillna(0)
+    metrics.index = metrics.index.set_names(house_agg.index.names)
     metrics["business_activity"] = sum(metrics.get(cat, 0) * weight for cat, weight in ACTIVITY_WEIGHTS.items())
     metrics["activity_norm"] = minmax(metrics["business_activity"])
     metrics["price_norm"] = minmax(metrics["avg_price"])
@@ -245,9 +338,9 @@ def ingest(data_dir: Path = DATA_DIR) -> None:
     Base.metadata.drop_all(bind=engine)
     Base.metadata.create_all(bind=engine)
     street_shapes = load_street_shapes(data_dir / "sh_street_boundary" / "shanghai_street_boundary.shp")
-    houses = load_house_rows(data_dir / "sh_house_dataset_raw.parquet")
+    houses = load_house_rows(HOUSE_DATASET_CSV_PATH)
+    houses = geocode_house_rows(houses)
     pois = pd.DataFrame(iter_poi_rows(data_dir / "sh_poi_raw"))
-    houses = assign_streets(houses, street_shapes)
     pois = assign_streets(pois, street_shapes)
     metrics, category_counts = build_metrics(houses, pois)
     street_metrics = build_street_metrics(houses, pois)
@@ -255,7 +348,9 @@ def ingest(data_dir: Path = DATA_DIR) -> None:
     with SessionLocal.begin() as db:
         for table in [HouseListing, PoiPoint, DistrictMetric, StreetMetric, PoiCategoryMetric]:
             db.execute(delete(table))
-        db.bulk_insert_mappings(HouseListing, houses.to_dict(orient="records"))
+        house_columns = ["house_id", "district", "street", "price", "unit_price", "wgs84_lng", "wgs84_lat", "gcj02_lng",
+                         "gcj02_lat"]
+        db.bulk_insert_mappings(HouseListing, houses[house_columns].to_dict(orient="records"))
         db.bulk_insert_mappings(PoiPoint, pois.to_dict(orient="records"))
         db.bulk_insert_mappings(DistrictMetric, metrics.to_dict(orient="records"))
         if not street_metrics.empty:

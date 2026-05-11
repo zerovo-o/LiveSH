@@ -10,7 +10,9 @@ EE = 0.00669342162296594323
 
 def normalize_district(value: object) -> str:
     text = str(value or "").strip()
-    text = re.sub(r"上海市?", "", text)
+    if text in {"上海周边", "周边"}:
+        return "上海周边"
+    text = re.sub(r"^上海市", "", text)
     text = text.replace("浦东新区", "浦东")
     text = re.sub(r"(新区|区|县)$", "", text)
     return text or "未知"
@@ -48,4 +50,22 @@ def wgs84_to_gcj02(lng: float, lat: float) -> tuple[float, float]:
     dlat = (dlat * 180.0) / ((A * (1 - EE)) / (magic * sqrt_magic) * PI)
     dlng = (dlng * 180.0) / (A / sqrt_magic * math.cos(radlat) * PI)
     return lng + dlng, lat + dlat
+
+
+def gcj02_to_wgs84(lng: float, lat: float) -> tuple[float, float]:
+    if _out_of_china(lng, lat):
+        return lng, lat
+
+    guess_lng = lng
+    guess_lat = lat
+    for _ in range(6):
+        gcj_lng, gcj_lat = wgs84_to_gcj02(guess_lng, guess_lat)
+        delta_lng = lng - gcj_lng
+        delta_lat = lat - gcj_lat
+        guess_lng += delta_lng
+        guess_lat += delta_lat
+        if abs(delta_lng) < 1e-7 and abs(delta_lat) < 1e-7:
+            break
+    return guess_lng, guess_lat
+
 
