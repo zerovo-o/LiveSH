@@ -35,7 +35,7 @@ ACTIVITY_WEIGHTS = {
 
 STREET_BOUNDARY_PATH = DATA_DIR / "sh_street_boundary" / "shanghai_street_boundary.shp"
 HOUSE_DATASET_CSV_PATH = DATA_DIR / "anjuke17w" / "dataset.csv"
-HOUSE_GEOCODE_CACHE_PATH = BACKEND_DIR / "data"/ ".cache" / "house_geocode_cache.json"
+HOUSE_GEOCODE_CACHE_PATH = DATA_DIR / ".cache" / "house_geocode_cache.json"
 GEOCODE_SAVE_INTERVAL = 60
 
 
@@ -66,7 +66,7 @@ def _save_geocode_cache(path: Path, cache: dict[str, list[float] | None]) -> Non
 
 
 def _geocode_cache_key(district: object, street: object, community: object) -> str:
-    return "\x1f".join((_clean_text(district), _clean_text(street), _clean_text(community)))
+    return "-".join((_clean_text(district), _clean_text(street), _clean_text(community)))
 
 
 def minmax(series: pd.Series) -> pd.Series:
@@ -202,7 +202,7 @@ def geocode_house_rows(rows: pd.DataFrame, cache_path: Path = HOUSE_GEOCODE_CACH
     _save_geocode_cache(cache_path, cache)
 
     rows = rows.copy()
-    rows["geocode_key"] = (rows["district"].map(_clean_text) + "\x1f" + rows["street"].map(_clean_text) + "\x1f" + rows[
+    rows["geocode_key"] = (rows["district"].map(_clean_text) + "-" + rows["street"].map(_clean_text) + "-" + rows[
         "community"].map(_clean_text))
     lookups = rows["geocode_key"].map(lambda key: geocode_map.get(key, (None, None, None, None)))
     rows[["gcj02_lng", "gcj02_lat", "wgs84_lng", "wgs84_lat"]] = pd.DataFrame(lookups.tolist(), index=rows.index)
