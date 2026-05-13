@@ -1,4 +1,4 @@
-﻿import { AlertCircle, Loader2, Navigation, Sparkles } from "lucide-react";
+﻿import { AlertCircle, Loader2, Sparkles } from "lucide-react";
 import { useMemo, useState } from "react";
 import { recommendHouses } from "../lib/agentApi";
 import { formatPrice } from "../lib/utils";
@@ -6,8 +6,7 @@ import type {
   CommuteMode,
   HouseRecommendRequest,
   HouseRecommendResponse,
-  HouseRecommendation,
-  StreetRecommendation
+  HouseRecommendation
 } from "../types/agent";
 import { Badge } from "./ui/badge";
 import { Button } from "./ui/button";
@@ -35,18 +34,7 @@ export default function PersonalizedAgentPanel() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<HouseRecommendResponse | null>(null);
-
-  const housesByStreet = useMemo(() => {
-    if (!result) return new Map<string, HouseRecommendation[]>();
-    const map = new Map<string, HouseRecommendation[]>();
-    result.houses.forEach((house) => {
-      const key = `${house.district}::${house.sub_district}`;
-      const current = map.get(key) ?? [];
-      current.push(house);
-      map.set(key, current);
-    });
-    return map;
-  }, [result]);
+  const houses = useMemo(() => result?.houses ?? [], [result]);
 
   const onSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -79,8 +67,8 @@ export default function PersonalizedAgentPanel() {
           <Sparkles className="h-4 w-4" />
         </div>
         <div>
-          <h2 className="text-base font-black text-[#33251f]">个性化区域与房源推荐</h2>
-          <p className="text-xs text-[#806653]">先筛通勤可达街道，再推荐具体房源</p>
+          <h2 className="text-base font-black text-[#33251f]">个性化房源推荐</h2>
+          <p className="text-xs text-[#806653]">按预算与通勤筛选并推荐具体房源</p>
         </div>
       </div>
 
@@ -154,7 +142,7 @@ export default function PersonalizedAgentPanel() {
         </Field>
 
         <div className="grid grid-cols-2 gap-2">
-          <Field label="街道数量">
+          <Field label="候选街道数">
             <input
               className="h-9 w-full rounded-lg border border-[#ead8c2] bg-white px-3 text-sm text-[#33251f] outline-none focus:border-[#f3c99a]"
               type="number"
@@ -165,7 +153,7 @@ export default function PersonalizedAgentPanel() {
               required
             />
           </Field>
-          <Field label="每街道房源数">
+          <Field label="返回房源组数">
             <input
               className="h-9 w-full rounded-lg border border-[#ead8c2] bg-white px-3 text-sm text-[#33251f] outline-none focus:border-[#f3c99a]"
               type="number"
@@ -186,7 +174,7 @@ export default function PersonalizedAgentPanel() {
           className="h-9 w-full bg-[#d45f34] text-white hover:bg-[#bd4f27]"
         >
           {loading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-          生成街道与房源推荐
+          生成房源推荐
         </Button>
       </form>
 
@@ -210,17 +198,14 @@ export default function PersonalizedAgentPanel() {
           </div>
         ) : null}
 
-        {!loading && result && result.streets.length === 0 ? (
+        {!loading && result && houses.length === 0 ? (
           <div className="rounded-lg border border-[#f3e1cb] bg-white/80 p-3 text-sm text-[#775f4d]">
-            暂无可推荐街道，请放宽预算或通勤约束后重试。
+            暂无可推荐房源，请放宽预算或通勤约束后重试。
           </div>
         ) : null}
-
-        {result?.streets.map((street) => {
-          const key = `${street.district}::${street.sub_district}`;
-          const houses = housesByStreet.get(key) ?? [];
-          return <StreetCard key={key} street={street} houses={houses} />;
-        })}
+        {houses.map((house) => (
+          <HouseCard key={`${house.house_id}-${house.district}-${house.sub_district}`} house={house} />
+        ))}
       </div>
     </aside>
   );
@@ -235,93 +220,36 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
   );
 }
 
-function StreetCard({
-  street,
-  houses
-}: {
-  street: StreetRecommendation;
-  houses: HouseRecommendation[];
-}) {
-  const scoreLabel = `${Math.round(street.street_score * 100)} 分`;
-  const commuteLabel =
-    street.median_commute_minutes === null ? "暂无" : `${Math.round(street.median_commute_minutes)} 分钟`;
-  const affordableLabel = `${Math.round(street.affordable_ratio * 100)}%`;
-
-  return (
-    <Card className="border-[#f1dfc9] bg-[#fffdf8] shadow-none">
-      <CardHeader className="pb-2">
-        <CardTitle className="flex items-center justify-between gap-2 text-sm text-[#3c2a20]">
-          <span>
-            {street.district} · {street.sub_district}
-          </span>
-          <Badge className="bg-[#33a985] text-white">{scoreLabel}</Badge>
-        </CardTitle>
-      </CardHeader>
-      <CardContent className="space-y-2 text-xs text-[#5f4a3d]">
-        <div className="grid grid-cols-3 gap-2">
-          <Metric label="中位通勤" value={commuteLabel} icon={<Navigation className="h-3.5 w-3.5" />} />
-          <Metric label="样本房源" value={street.house_count.toLocaleString("zh-CN")} />
-          <Metric label="可负担占比" value={affordableLabel} />
-        </div>
-
-        <div>
-          <div className="font-semibold text-[#33251f]">街道理由</div>
-          <p className="mt-1 leading-5">{street.reason}</p>
-        </div>
-
-        <div className="space-y-2">
-          <div className="font-semibold text-[#33251f]">推荐房源</div>
-          {houses.length === 0 ? (
-            <p className="text-[#806653]">暂无房源可展示。</p>
-          ) : (
-            houses.map((house) => <HouseItem key={house.house_id} house={house} />)
-          )}
-        </div>
-      </CardContent>
-    </Card>
-  );
-}
-
-function HouseItem({ house }: { house: HouseRecommendation }) {
+function HouseCard({ house }: { house: HouseRecommendation }) {
   const commuteLabel = house.commute_minutes === null ? "暂无" : `${Math.round(house.commute_minutes)} 分钟`;
   const areaLabel = house.area === null ? "面积未知" : `${house.area.toFixed(1)}㎡`;
   return (
-    <div className="rounded-md border border-[#f3e1cb] bg-white/75 p-2">
-      <div className="flex items-start justify-between gap-2">
-        <div className="text-[12px] font-semibold text-[#33251f] line-clamp-2">
-          {house.title || `${house.community_name || "房源"} ${house.house_id}`}
+    <Card className="border-[#f1dfc9] bg-[#fffdf8] shadow-none">
+      <CardHeader className="pb-2">
+        <CardTitle className="flex items-start justify-between gap-2 text-sm text-[#3c2a20]">
+          <span className="line-clamp-2">
+            {house.title || `${house.community_name || "房源"} ${house.house_id}`}
+          </span>
+          <Badge className="bg-[#33a985] text-white">{Math.round(house.score * 100)} 分</Badge>
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-2 text-xs text-[#5f4a3d]">
+        <div className="rounded-md border border-[#f3e1cb] bg-white/75 p-2">
+          <div className="text-[11px] text-[#806653]">
+            {house.district} · {house.sub_district}
+          </div>
+          <div className="mt-1 grid grid-cols-2 gap-1 text-[11px] text-[#6e5543]">
+            <span>{formatPrice(house.unit_price)}</span>
+            <span>{house.total_price.toFixed(1)} 万</span>
+            <span>{commuteLabel}</span>
+            <span>{areaLabel}</span>
+          </div>
         </div>
-        <Badge variant="outline" className="border-[#f3c99a] bg-[#fff4df] text-[#9a5a1d]">
-          {Math.round(house.score * 100)}
-        </Badge>
-      </div>
-      <div className="mt-1 grid grid-cols-2 gap-1 text-[11px] text-[#6e5543]">
-        <span>{formatPrice(house.unit_price)}</span>
-        <span>{house.total_price.toFixed(1)} 万</span>
-        <span>{commuteLabel}</span>
-        <span>{areaLabel}</span>
-      </div>
-      <p className="mt-1 text-[11px] leading-4 text-[#6a5242]">{house.reason}</p>
-    </div>
-  );
-}
-
-function Metric({
-  label,
-  value,
-  icon
-}: {
-  label: string;
-  value: string;
-  icon?: React.ReactNode;
-}) {
-  return (
-    <div className="rounded-md border border-[#f3e1cb] bg-white/70 p-2">
-      <div className="flex items-center gap-1 text-[11px] text-[#8a6f5a]">
-        {icon}
-        {label}
-      </div>
-      <div className="mt-1 text-xs font-semibold text-[#33251f]">{value}</div>
-    </div>
+        <div>
+          <div className="font-semibold text-[#33251f]">推荐理由</div>
+          <p className="mt-1 leading-5">{house.reason}</p>
+        </div>
+      </CardContent>
+    </Card>
   );
 }
