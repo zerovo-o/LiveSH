@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
+from math import asin, cos, radians, sin, sqrt
 from typing import Any, Literal
 from urllib.parse import urlencode
 from urllib.request import urlopen
@@ -14,6 +15,9 @@ CommuteMode = Literal["transit", "driving"]
 GEOCODE_URL = "https://restapi.amap.com/v3/geocode/geo"
 DRIVING_URL = "https://restapi.amap.com/v5/direction/driving"
 TRANSIT_URL = "https://restapi.amap.com/v5/direction/transit/integrated"
+
+_GEOCODE_CACHE: dict[str, GeocodeLocation | None] = {}
+_ROUTE_CACHE: dict[tuple[str, str, CommuteMode], float | None] = {}
 
 
 @dataclass
@@ -59,6 +63,10 @@ def _parse_location(value: str) -> GeocodeLocation | None:
 
 
 def geocode_address(address: str, city: str = "上海") -> GeocodeLocation | None:
+    cache_key = f"{city}|{address}".strip()
+    if cache_key in _GEOCODE_CACHE:
+        return _GEOCODE_CACHE[cache_key]
+
     result = _request_json(
         GEOCODE_URL,
         {
@@ -67,17 +75,47 @@ def geocode_address(address: str, city: str = "上海") -> GeocodeLocation | Non
         },
     )
     if not result.ok or not result.data:
+        _GEOCODE_CACHE[cache_key] = None
         return None
 
     geocodes = result.data.get("geocodes") or []
     if not geocodes:
+        _GEOCODE_CACHE[cache_key] = None
         return None
-    return _parse_location(str(geocodes[0].get("location", "")))
+    location = _parse_location(str(geocodes[0].get("location", "")))
+    _GEOCODE_CACHE[cache_key] = location
+    return location
+
+
+def _haversine_km(origin: GeocodeLocation, destination: GeocodeLocation) -> float:
+    lon1, lat1 = origin
+    lon2, lat2 = destination
+    r = 6371.0
+    dlon = radians(lon2 - lon1)
+    dlat = radians(lat2 - lat1)
+    a = sin(dlat / 2) ** 2 + cos(radians(lat1)) * cos(radians(lat2)) * sin(dlon / 2) ** 2
+    return 2 * r * asin(sqrt(a))
+
+
+def estimate_commute_minutes(origin: GeocodeLocation, destination: GeocodeLocation, mode: CommuteMode) -> float:
+    distance_km = max(0.0, _haversine_km(origin, destination))
+    if mode == "driving":
+        speed_kmh = 28.0
+        overhead_min = 6.0
+    else:
+        speed_kmh = 18.0
+        overhead_min = 12.0
+    estimate = distance_km / speed_kmh * 60.0 + overhead_min
+    return max(5.0, round(estimate, 1))
 
 
 def get_commute_minutes(origin: GeocodeLocation, destination: GeocodeLocation, mode: CommuteMode) -> float | None:
     origin_str = f"{origin[0]},{origin[1]}"
     destination_str = f"{destination[0]},{destination[1]}"
+    cache_key = (origin_str, destination_str, mode)
+    if cache_key in _ROUTE_CACHE:
+        return _ROUTE_CACHE[cache_key]
+
     if mode == "driving":
         result = _request_json(
             DRIVING_URL,
@@ -97,7 +135,9 @@ def get_commute_minutes(origin: GeocodeLocation, destination: GeocodeLocation, m
             duration_seconds = float(paths[0].get("duration"))
         except (TypeError, ValueError):
             return None
-        return duration_seconds / 60.0
+        value = duration_seconds / 60.0
+        _ROUTE_CACHE[cache_key] = value
+        return value
 
     result = _request_json(
         TRANSIT_URL,
@@ -119,5 +159,6 @@ def get_commute_minutes(origin: GeocodeLocation, destination: GeocodeLocation, m
         duration_seconds = float(transits[0].get("duration"))
     except (TypeError, ValueError):
         return None
-    return duration_seconds / 60.0
-
+    value = duration_seconds / 60.0
+    _ROUTE_CACHE[cache_key] = value
+    return value

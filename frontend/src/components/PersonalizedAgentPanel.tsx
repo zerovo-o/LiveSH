@@ -24,8 +24,6 @@ const DEFAULT_FORM: HouseRecommendRequest = {
   top_houses_per_street: 3,
   top_communities: 3,
   top_houses_per_community: 3,
-  healthcare_weight: 1.2,
-  shopping_weight: 1.1,
   daily_life_weight: 1.0,
   commute_facility_weight: 1.0,
   medical_weight: 1.0,
@@ -62,8 +60,6 @@ export default function PersonalizedAgentPanel() {
         top_houses_per_street: Number(form.top_houses_per_street),
         top_communities: Number(form.top_communities),
         top_houses_per_community: Number(form.top_houses_per_community),
-        healthcare_weight: Number(form.healthcare_weight),
-        shopping_weight: Number(form.shopping_weight),
         daily_life_weight: Number(form.daily_life_weight),
         commute_facility_weight: Number(form.commute_facility_weight),
         medical_weight: Number(form.medical_weight),
@@ -174,62 +170,6 @@ export default function PersonalizedAgentPanel() {
           />
         </Field>
 
-        <div className="grid grid-cols-2 gap-2">
-          <Field label="医疗权重">
-            <input
-              className="h-9 w-full rounded-lg border border-[#ead8c2] bg-white px-3 text-sm text-[#33251f] outline-none focus:border-[#f3c99a]"
-              type="number"
-              min={0}
-              max={3}
-              step={0.1}
-              value={form.healthcare_weight}
-              onChange={(event) =>
-                setForm((prev) => ({ ...prev, healthcare_weight: Number(event.target.value) || 0 }))
-              }
-            />
-          </Field>
-          <Field label="商业权重">
-            <input
-              className="h-9 w-full rounded-lg border border-[#ead8c2] bg-white px-3 text-sm text-[#33251f] outline-none focus:border-[#f3c99a]"
-              type="number"
-              min={0}
-              max={3}
-              step={0.1}
-              value={form.shopping_weight}
-              onChange={(event) =>
-                setForm((prev) => ({ ...prev, shopping_weight: Number(event.target.value) || 0 }))
-              }
-            />
-          </Field>
-        </div>
-
-        <div className="grid grid-cols-2 gap-2">
-          <Field label="日常便利权重">
-            <input
-              className="h-9 w-full rounded-lg border border-[#ead8c2] bg-white px-3 text-sm text-[#33251f] outline-none focus:border-[#f3c99a]"
-              type="number"
-              min={0}
-              max={3}
-              step={0.1}
-              value={form.daily_life_weight}
-              onChange={(event) =>
-                setForm((prev) => ({ ...prev, daily_life_weight: Number(event.target.value) || 0 }))
-              }
-            />
-          </Field>
-          <Field label="交通设施权重">
-            <input
-              className="h-9 w-full rounded-lg border border-[#ead8c2] bg-white px-3 text-sm text-[#33251f] outline-none focus:border-[#f3c99a]"
-              type="number"
-              min={0}
-              max={3}
-              step={0.1}
-              value={form.commute_facility_weight}
-              onChange={(event) =>
-                setForm((prev) => ({ ...prev, commute_facility_weight: Number(event.target.value) || 0 }))
-              }
-            />
-          </Field>
         </div>
 
         <div className="grid grid-cols-2 gap-2">
@@ -327,6 +267,9 @@ export default function PersonalizedAgentPanel() {
           {loading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
           生成推荐
         </Button>
+        <p className="text-[11px] text-[#806653]">
+          ??????????????????????????????????????????????????? Top ?????????????????? API????????????????????????
+        </p>
       </form>
 
       {error ? (

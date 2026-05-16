@@ -15,8 +15,10 @@ class HouseRecommendRequest(BaseModel):
     top_houses_per_street: int = Field(default=3, ge=1, le=10)
     top_communities: int = Field(default=3, ge=1, le=10)
     top_houses_per_community: int = Field(default=3, ge=1, le=10)
-    healthcare_weight: float = Field(default=1.0, ge=0, le=3)
-    shopping_weight: float = Field(default=1.0, ge=0, le=3)
+    # These two are kept for backward compatibility, but the frontend can omit them.
+    # When they are 0, backend will fall back to daily_life_weight / medical_weight.
+    healthcare_weight: float = Field(default=0.0, ge=0, le=3)
+    shopping_weight: float = Field(default=0.0, ge=0, le=3)
     daily_life_weight: float = Field(default=1.0, ge=0, le=3)
     commute_facility_weight: float = Field(default=1.0, ge=0, le=3)
     medical_weight: float = Field(default=1.0, ge=0, le=3)

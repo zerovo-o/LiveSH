@@ -10,8 +10,6 @@ export type HouseRecommendRequest = {
   top_houses_per_street: number;
   top_communities: number;
   top_houses_per_community: number;
-  healthcare_weight: number;
-  shopping_weight: number;
   daily_life_weight: number;
   commute_facility_weight: number;
   medical_weight: number;

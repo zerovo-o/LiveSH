@@ -7,7 +7,7 @@ from typing import Literal
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from .amap_client import geocode_address, get_commute_minutes
+from .amap_client import estimate_commute_minutes, geocode_address, get_commute_minutes
 from .config import LLM_RERANK_WEIGHT, RECOMMENDER_VERSION
 from .house_recommend_schemas import (
     CommunityRecommendation,
@@ -290,6 +290,35 @@ def _compute_community_rule_score(item: CommunityCandidate, version: Version) ->
     return score, breakdown
 
 
+
+
+def _weight_inputs(payload: HouseRecommendRequest) -> tuple[float, float]:
+    shopping = payload.shopping_weight if payload.shopping_weight > 0 else payload.daily_life_weight
+    healthcare = payload.healthcare_weight if payload.healthcare_weight > 0 else payload.medical_weight
+    return shopping, healthcare
+
+
+def _compute_house_pre_commute_score(item: HouseCandidate, version: Version) -> float:
+    if version == "v3":
+        return _clamp(
+            0.39 * item.budget_score
+            + 0.17 * item.poi_score
+            + 0.17 * item.poi_subtype_score
+            + 0.13 * item.access_score
+            + 0.08 * item.e2sfca_score
+            + 0.06 * item.calibrated_score
+        )
+    if version == "v2":
+        return _clamp(
+            0.43 * item.budget_score
+            + 0.19 * item.poi_score
+            + 0.18 * item.access_score
+            + 0.12 * item.e2sfca_score
+            + 0.08 * item.calibrated_score
+        )
+    return _clamp(0.62 * item.budget_score + 0.25 * item.poi_score + 0.13 * item.convenience_score)
+
+
 def _build_house_rerank_rows(candidates: list[HouseCandidate], max_items: int) -> list[dict]:
     rows: list[dict] = []
     for item in sorted(candidates, key=lambda x: x.rule_score, reverse=True)[:max_items]:
@@ -491,15 +520,16 @@ def recommend_houses(payload: HouseRecommendRequest, db: Session) -> HouseRecomm
     if work_location is not None:
         work_location_str = f"{work_location[0]:.6f},{work_location[1]:.6f}"
 
+    shopping_weight, healthcare_weight = _weight_inputs(payload)
     convenience_map, _traffic_map, poi_pref_map = _build_metric_maps(
         db,
-        healthcare_weight=payload.healthcare_weight,
-        shopping_weight=payload.shopping_weight,
+        healthcare_weight=healthcare_weight,
+        shopping_weight=shopping_weight,
     )
     poi_pref_maps = build_poi_preference_maps(
         db,
-        shopping_weight=payload.shopping_weight,
-        healthcare_weight=payload.healthcare_weight,
+        shopping_weight=shopping_weight,
+        healthcare_weight=healthcare_weight,
         daily_life_weight=payload.daily_life_weight,
         commute_facility_weight=payload.commute_facility_weight,
         medical_weight=payload.medical_weight,
@@ -527,18 +557,12 @@ def recommend_houses(payload: HouseRecommendRequest, db: Session) -> HouseRecomm
 
     route_calls = 0
     route_success_count = 0
-    for item in candidates:
-        if work_location is not None and route_calls < payload.max_route_calls:
-            origin = (float(item.model.gcj02_lng), float(item.model.gcj02_lat))
-            commute = get_commute_minutes(origin, work_location, payload.commute_mode)
-            item.commute_minutes = round(commute, 1) if commute is not None else None
-            route_calls += 1
-            if commute is not None:
-                route_success_count += 1
+    fallback_commute_count = 0
 
+    # Stage 1: score without commute so we can reduce expensive route calls.
+    for item in candidates:
         district = item.model.district
         sub_district = item.model.sub_district or ""
-        item.commute_score = _build_commute_score(item.commute_minutes, payload.max_commute_minutes)
         item.convenience_score = livable_v2_map.get(district, convenience_map.get(district, 0.5))
         item.poi_score = poi_pref_map.get(district, 0.5)
         item.poi_subtype_score = street_poi_subtype_map.get(
@@ -549,7 +573,34 @@ def recommend_houses(payload: HouseRecommendRequest, db: Session) -> HouseRecomm
         item.e2sfca_score = e2sfca_map.get(district, 0.5)
         base_calibrated = calibrated_map.get(district, 0.5)
         item.calibrated_score = street_calibrated_map.get((district, sub_district), base_calibrated)
+        item.rule_score = _compute_house_pre_commute_score(item, version)
+        item.final_score = item.rule_score
 
+    # Stage 2: call route API only for top candidates.
+    candidates.sort(key=lambda item: item.rule_score, reverse=True)
+    route_budget = min(payload.max_route_calls, max(payload.top_communities * payload.top_houses_per_community * 6, 20))
+    route_target = candidates[:route_budget]
+
+    if work_location is not None:
+        for item in route_target:
+            origin = (float(item.model.gcj02_lng), float(item.model.gcj02_lat))
+            commute = get_commute_minutes(origin, work_location, payload.commute_mode)
+            route_calls += 1
+            if commute is None:
+                commute = estimate_commute_minutes(origin, work_location, payload.commute_mode)
+                fallback_commute_count += 1
+            else:
+                route_success_count += 1
+            item.commute_minutes = round(commute, 1) if commute is not None else None
+
+    # Stage 3: finalize score with commute component.
+    for item in candidates:
+        if item.commute_minutes is None and work_location is not None:
+            # no route call executed for this long-tail candidate, keep a conservative estimate
+            origin = (float(item.model.gcj02_lng), float(item.model.gcj02_lat))
+            item.commute_minutes = estimate_commute_minutes(origin, work_location, payload.commute_mode)
+            fallback_commute_count += 1
+        item.commute_score = _build_commute_score(item.commute_minutes, payload.max_commute_minutes)
         item.rule_score, item.breakdown = _compute_house_rule_score(item, version)
         item.final_score = item.rule_score
 
@@ -702,6 +753,7 @@ def recommend_houses(payload: HouseRecommendRequest, db: Session) -> HouseRecomm
         "amap_geocode_ok": bool(work_location is not None),
         "amap_route_success_count": route_success_count,
         "amap_route_failure_count": max(0, route_calls - route_success_count),
+        "commute_fallback_count": fallback_commute_count,
         "poi_pref_ready": poi_pref_maps.diagnostics.get("poi_pref_ready", False),
         "poi_pref_grouped_rows": int(poi_pref_maps.diagnostics.get("poi_pref_grouped_rows", 0)),
         "poi_pref_street_keys": int(poi_pref_maps.diagnostics.get("poi_pref_street_keys", 0)),
