@@ -28,6 +28,7 @@ class StreetRecommendation(BaseModel):
     median_commute_minutes: float | None = None
     house_count: int
     affordable_ratio: float
+    score_breakdown: dict[str, float] | None = None
     reason: str
     risks: list[str]
 
@@ -47,6 +48,7 @@ class HouseRecommendation(BaseModel):
     llm_score: float | None = None
     llm_confidence: float | None = None
     community_score: float | None = None
+    score_breakdown: dict[str, float] | None = None
     reason: str
     risks: list[str]
 
@@ -66,6 +68,7 @@ class CommunityRecommendation(BaseModel):
     poi_score: float
     traffic_score: float
     budget_match_score: float
+    score_breakdown: dict[str, float] | None = None
     reason: str
     risks: list[str]
 

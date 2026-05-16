@@ -2,12 +2,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from statistics import mean, median
+from typing import Literal
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from .amap_client import geocode_address, get_commute_minutes
-from .config import LLM_RERANK_WEIGHT
+from .config import LLM_RERANK_WEIGHT, RECOMMENDER_VERSION
 from .house_recommend_schemas import (
     CommunityRecommendation,
     HouseRecommendRequest,
@@ -16,7 +17,9 @@ from .house_recommend_schemas import (
     StreetRecommendation,
 )
 from .llm_rerank import rerank_community_candidates, rerank_house_candidates
-from .models import DistrictMetric, HouseListing
+from .models import DistrictMetric, HouseListing, StreetMetric
+
+Version = Literal["v1", "v2"]
 
 
 @dataclass
@@ -27,11 +30,15 @@ class HouseCandidate:
     commute_score: float = 0.0
     convenience_score: float = 0.0
     poi_score: float = 0.0
+    access_score: float = 0.0
+    e2sfca_score: float = 0.0
+    calibrated_score: float = 0.0
     rule_score: float = 0.0
     llm_score: float | None = None
     llm_confidence: float | None = None
     final_score: float = 0.0
     llm_reason: str | None = None
+    breakdown: dict[str, float] | None = None
 
 
 @dataclass
@@ -47,15 +54,33 @@ class CommunityCandidate:
     budget_match_score: float
     poi_score: float
     traffic_score: float
+    access_score: float
+    e2sfca_score: float
+    calibrated_score: float
     rule_score: float
     llm_score: float | None = None
     llm_confidence: float | None = None
     final_score: float = 0.0
     llm_reason: str | None = None
+    breakdown: dict[str, float] | None = None
 
 
 def _clamp(value: float, low: float = 0.0, high: float = 1.0) -> float:
     return max(low, min(high, value))
+
+
+def _normalize(values: dict[str, float]) -> dict[str, float]:
+    if not values:
+        return {}
+    lo = min(values.values())
+    hi = max(values.values())
+    if hi == lo:
+        return {k: 0.5 for k in values}
+    return {k: _clamp((v - lo) / (hi - lo)) for k, v in values.items()}
+
+
+def _resolve_version() -> Version:
+    return "v2" if RECOMMENDER_VERSION == "v2" else "v1"
 
 
 def _build_budget_score(unit_price: float, affordable_unit_price: float) -> float:
@@ -73,16 +98,6 @@ def _build_commute_score(commute_minutes: float | None, max_commute_minutes: flo
     if commute_minutes <= max_commute_minutes:
         return _clamp(1 - commute_minutes / max_commute_minutes * 0.5)
     return _clamp(max(0.0, 1 - (commute_minutes / max_commute_minutes - 1)))
-
-
-def _normalize(values: dict[str, float]) -> dict[str, float]:
-    if not values:
-        return {}
-    lo = min(values.values())
-    hi = max(values.values())
-    if hi == lo:
-        return {k: 0.5 for k in values}
-    return {k: _clamp((v - lo) / (hi - lo)) for k, v in values.items()}
 
 
 def _build_metric_maps(
@@ -103,57 +118,151 @@ def _build_metric_maps(
     return _normalize(convenience_raw), _normalize(traffic_raw), _normalize(poi_pref_raw)
 
 
+def _build_advanced_metric_maps(
+    db: Session,
+) -> tuple[dict[str, float], dict[str, float], dict[str, float], dict[str, float], dict[str, float]]:
+    districts = db.scalars(select(DistrictMetric)).all()
+    streets = db.scalars(select(StreetMetric)).all()
+
+    district_access_raw = {row.district: float(row.access_score) for row in districts}
+    district_e2sfca_raw = {row.district: float(row.e2sfca_access_score) for row in districts}
+    district_calibrated_raw = {row.district: float(row.calibrated_score) for row in districts}
+    district_livable_v2_raw = {row.district: float(row.livability_score_v2) for row in districts}
+
+    street_calibrated_raw = {
+        (row.district, row.street): float(row.calibrated_score)
+        for row in streets
+    }
+
+    return (
+        _normalize(district_access_raw),
+        _normalize(district_e2sfca_raw),
+        _normalize(district_calibrated_raw),
+        _normalize(district_livable_v2_raw),
+        _normalize(street_calibrated_raw),
+    )
+
+
 def _house_reason(item: HouseCandidate) -> str:
     if item.llm_reason:
         return item.llm_reason
-    if item.commute_minutes is None:
-        commute_text = "通勤时间暂未获取"
-    else:
-        commute_text = f"预计通勤约{int(round(item.commute_minutes))}分钟"
-    return f"预算匹配度较好，{commute_text}，并结合区域配套与交通便利度进行综合排序。"
+    commute_text = (
+        "暂未获取有效通勤时间"
+        if item.commute_minutes is None
+        else f"预计通勤约 {int(round(item.commute_minutes))} 分钟"
+    )
+    return f"预算匹配较好，{commute_text}，综合配套与可达性表现稳定。"
 
 
 def _street_reason(sub_district: str, median_commute: float | None, affordable_ratio: float) -> str:
     commute_text = (
-        f"中位通勤约{int(round(median_commute))}分钟" if median_commute is not None else "通勤时间样本有限"
+        f"中位通勤约 {int(round(median_commute))} 分钟"
+        if median_commute is not None
+        else "通勤时间暂未稳定获取"
     )
-    return f"{sub_district}样本中可负担房源占比约{int(round(affordable_ratio * 100))}%，{commute_text}。"
+    return f"{sub_district} 预算可承受房源占比约 {int(round(affordable_ratio * 100))}%，{commute_text}。"
 
 
 def _community_reason(item: CommunityCandidate) -> str:
     if item.llm_reason:
         return item.llm_reason
     commute_text = (
-        f"中位通勤约{int(round(item.median_commute_minutes))}分钟"
+        f"中位通勤约 {int(round(item.median_commute_minutes))} 分钟"
         if item.median_commute_minutes is not None
-        else "通勤时间暂未完整获取"
+        else "通勤时间暂未稳定获取"
     )
     return (
-        f"均价约{int(round(item.avg_unit_price))}元/㎡，总价均值约{item.avg_total_price:.1f}万，"
-        f"{commute_text}，医疗与商业配套评分表现较好。"
+        f"该小区均价约 {int(round(item.avg_unit_price))} 元/㎡，均总价约 {item.avg_total_price:.1f} 万，"
+        f"{commute_text}，预算与可达性综合匹配度较好。"
     )
+
+
+def _compute_house_rule_score(item: HouseCandidate, version: Version) -> tuple[float, dict[str, float]]:
+    if version == "v2":
+        score = _clamp(
+            0.34 * item.budget_score
+            + 0.26 * item.commute_score
+            + 0.14 * item.poi_score
+            + 0.12 * item.access_score
+            + 0.08 * item.e2sfca_score
+            + 0.06 * item.calibrated_score
+        )
+        breakdown = {
+            "budget": round(item.budget_score, 4),
+            "commute": round(item.commute_score, 4),
+            "poi_pref": round(item.poi_score, 4),
+            "access": round(item.access_score, 4),
+            "e2sfca": round(item.e2sfca_score, 4),
+            "calibrated": round(item.calibrated_score, 4),
+        }
+        return score, breakdown
+
+    score = _clamp(
+        0.42 * item.budget_score + 0.33 * item.commute_score + 0.17 * item.poi_score + 0.08 * item.convenience_score
+    )
+    breakdown = {
+        "budget": round(item.budget_score, 4),
+        "commute": round(item.commute_score, 4),
+        "poi_pref": round(item.poi_score, 4),
+        "convenience": round(item.convenience_score, 4),
+    }
+    return score, breakdown
+
+
+def _compute_community_rule_score(item: CommunityCandidate, version: Version) -> tuple[float, dict[str, float]]:
+    if version == "v2":
+        score = _clamp(
+            0.34 * item.budget_match_score
+            + 0.25 * item.traffic_score
+            + 0.14 * item.poi_score
+            + 0.12 * item.access_score
+            + 0.08 * item.e2sfca_score
+            + 0.07 * item.calibrated_score
+        )
+        breakdown = {
+            "budget": round(item.budget_match_score, 4),
+            "traffic": round(item.traffic_score, 4),
+            "poi_pref": round(item.poi_score, 4),
+            "access": round(item.access_score, 4),
+            "e2sfca": round(item.e2sfca_score, 4),
+            "calibrated": round(item.calibrated_score, 4),
+        }
+        return score, breakdown
+
+    score = _clamp(
+        0.40 * item.budget_match_score + 0.30 * item.traffic_score + 0.20 * item.poi_score + 0.10 * item.access_score
+    )
+    breakdown = {
+        "budget": round(item.budget_match_score, 4),
+        "traffic": round(item.traffic_score, 4),
+        "poi_pref": round(item.poi_score, 4),
+        "access": round(item.access_score, 4),
+    }
+    return score, breakdown
 
 
 def _build_house_rerank_rows(candidates: list[HouseCandidate], max_items: int) -> list[dict]:
     rows: list[dict] = []
     for item in sorted(candidates, key=lambda x: x.rule_score, reverse=True)[:max_items]:
-        rows.append(
-            {
-                "house_id": str(item.model.house_id or item.model.id),
-                "district": item.model.district,
-                "sub_district": item.model.sub_district or "未知",
-                "community_name": item.model.community_name or "未知小区",
-                "unit_price": round(float(item.model.unit_price), 2),
-                "total_price": round(float(item.model.price), 2),
-                "area": round(float(item.model.area), 2) if item.model.area is not None else None,
-                "commute_minutes": item.commute_minutes,
-                "budget_score": round(item.budget_score, 4),
-                "commute_score": round(item.commute_score, 4),
-                "poi_score": round(item.poi_score, 4),
-                "convenience_score": round(item.convenience_score, 4),
-                "rule_score": round(item.rule_score, 4),
-            }
-        )
+        row = {
+            "house_id": str(item.model.house_id or item.model.id),
+            "district": item.model.district,
+            "sub_district": item.model.sub_district or "未知街道",
+            "community_name": item.model.community_name or "未知小区",
+            "unit_price": round(float(item.model.unit_price), 2),
+            "total_price": round(float(item.model.price), 2),
+            "area": round(float(item.model.area), 2) if item.model.area is not None else None,
+            "commute_minutes": item.commute_minutes,
+            "budget_score": round(item.budget_score, 4),
+            "commute_score": round(item.commute_score, 4),
+            "poi_score": round(item.poi_score, 4),
+            "convenience_score": round(item.convenience_score, 4),
+            "access_score": round(item.access_score, 4),
+            "e2sfca_score": round(item.e2sfca_score, 4),
+            "calibrated_score": round(item.calibrated_score, 4),
+            "rule_score": round(item.rule_score, 4),
+        }
+        rows.append(row)
     return rows
 
 
@@ -201,12 +310,12 @@ def _apply_house_llm_rerank(
     }
 
 
-def _group_communities(candidates: list[HouseCandidate]) -> list[CommunityCandidate]:
+def _group_communities(candidates: list[HouseCandidate], version: Version) -> list[CommunityCandidate]:
     grouped: dict[tuple[str, str, str], list[HouseCandidate]] = {}
     for item in candidates:
         key = (
             item.model.district,
-            item.model.sub_district or "未知",
+            item.model.sub_district or "未知街道",
             item.model.community_name or "未知小区",
         )
         grouped.setdefault(key, []).append(item)
@@ -221,28 +330,33 @@ def _group_communities(candidates: list[HouseCandidate]) -> list[CommunityCandid
         budget_match_score = mean(i.budget_score for i in items)
         poi_score = mean(i.poi_score for i in items)
         traffic_score = mean(i.commute_score for i in items)
-        convenience_score = mean(i.convenience_score for i in items)
-        rule_score = _clamp(
-            0.40 * budget_match_score + 0.30 * traffic_score + 0.20 * poi_score + 0.10 * convenience_score
-        )
+        access_score = mean(i.access_score for i in items)
+        e2sfca_score = mean(i.e2sfca_score for i in items)
+        calibrated_score = mean(i.calibrated_score for i in items)
+
         community_id = f"{district}|{sub_district}|{community_name}"
-        communities.append(
-            CommunityCandidate(
-                community_id=community_id,
-                district=district,
-                sub_district=sub_district,
-                community_name=community_name,
-                items=items,
-                avg_unit_price=avg_unit_price,
-                avg_total_price=avg_total_price,
-                median_commute_minutes=median_commute,
-                budget_match_score=budget_match_score,
-                poi_score=poi_score,
-                traffic_score=traffic_score,
-                rule_score=rule_score,
-                final_score=rule_score,
-            )
+        candidate = CommunityCandidate(
+            community_id=community_id,
+            district=district,
+            sub_district=sub_district,
+            community_name=community_name,
+            items=items,
+            avg_unit_price=avg_unit_price,
+            avg_total_price=avg_total_price,
+            median_commute_minutes=median_commute,
+            budget_match_score=budget_match_score,
+            poi_score=poi_score,
+            traffic_score=traffic_score,
+            access_score=access_score,
+            e2sfca_score=e2sfca_score,
+            calibrated_score=calibrated_score,
+            rule_score=0.0,
+            final_score=0.0,
         )
+        candidate.rule_score, candidate.breakdown = _compute_community_rule_score(candidate, version)
+        candidate.final_score = candidate.rule_score
+        communities.append(candidate)
+
     communities.sort(key=lambda x: x.rule_score, reverse=True)
     return communities
 
@@ -263,6 +377,9 @@ def _build_community_rerank_rows(communities: list[CommunityCandidate], max_item
                 "budget_match_score": round(item.budget_match_score, 4),
                 "poi_score": round(item.poi_score, 4),
                 "traffic_score": round(item.traffic_score, 4),
+                "access_score": round(item.access_score, 4),
+                "e2sfca_score": round(item.e2sfca_score, 4),
+                "calibrated_score": round(item.calibrated_score, 4),
                 "rule_score": round(item.rule_score, 4),
             }
         )
@@ -314,21 +431,21 @@ def _apply_community_llm_rerank(
 
 
 def recommend_houses(payload: HouseRecommendRequest, db: Session) -> HouseRecommendResponse:
+    version = _resolve_version()
     affordable_unit_price = payload.budget_wan * 10000.0 / payload.target_area
     work_location = geocode_address(payload.work_address)
     work_location_str = None
     if work_location is not None:
         work_location_str = f"{work_location[0]:.6f},{work_location[1]:.6f}"
 
-    convenience_map, traffic_map, poi_pref_map = _build_metric_maps(
+    convenience_map, _traffic_map, poi_pref_map = _build_metric_maps(
         db,
         healthcare_weight=payload.healthcare_weight,
         shopping_weight=payload.shopping_weight,
     )
+    access_map, e2sfca_map, calibrated_map, livable_v2_map, street_calibrated_map = _build_advanced_metric_maps(db)
 
-    house_rows = db.scalars(
-        select(HouseListing).where(HouseListing.unit_price <= affordable_unit_price * 1.35)
-    ).all()
+    house_rows = db.scalars(select(HouseListing).where(HouseListing.unit_price <= affordable_unit_price * 1.35)).all()
     if not house_rows:
         house_rows = db.scalars(select(HouseListing)).all()
 
@@ -343,19 +460,27 @@ def recommend_houses(payload: HouseRecommendRequest, db: Session) -> HouseRecomm
     candidates = candidates[: max(payload.max_route_calls, payload.top_communities * payload.top_houses_per_community * 10)]
 
     route_calls = 0
+    route_success_count = 0
     for item in candidates:
         if work_location is not None and route_calls < payload.max_route_calls:
             origin = (float(item.model.gcj02_lng), float(item.model.gcj02_lat))
             commute = get_commute_minutes(origin, work_location, payload.commute_mode)
             item.commute_minutes = round(commute, 1) if commute is not None else None
             route_calls += 1
+            if commute is not None:
+                route_success_count += 1
 
+        district = item.model.district
+        sub_district = item.model.sub_district or ""
         item.commute_score = _build_commute_score(item.commute_minutes, payload.max_commute_minutes)
-        item.convenience_score = convenience_map.get(item.model.district, 0.5)
-        item.poi_score = poi_pref_map.get(item.model.district, 0.5)
-        item.rule_score = _clamp(
-            0.42 * item.budget_score + 0.33 * item.commute_score + 0.17 * item.poi_score + 0.08 * item.convenience_score
-        )
+        item.convenience_score = livable_v2_map.get(district, convenience_map.get(district, 0.5))
+        item.poi_score = poi_pref_map.get(district, 0.5)
+        item.access_score = access_map.get(district, 0.5)
+        item.e2sfca_score = e2sfca_map.get(district, 0.5)
+        base_calibrated = calibrated_map.get(district, 0.5)
+        item.calibrated_score = street_calibrated_map.get((district, sub_district), base_calibrated)
+
+        item.rule_score, item.breakdown = _compute_house_rule_score(item, version)
         item.final_score = item.rule_score
 
     house_rerank_diag = _apply_house_llm_rerank(
@@ -366,7 +491,7 @@ def recommend_houses(payload: HouseRecommendRequest, db: Session) -> HouseRecomm
 
     grouped_streets: dict[tuple[str, str], list[HouseCandidate]] = {}
     for item in candidates:
-        key = (item.model.district, item.model.sub_district or "未知")
+        key = (item.model.district, item.model.sub_district or "未知街道")
         grouped_streets.setdefault(key, []).append(item)
 
     street_rows: list[StreetRecommendation] = []
@@ -378,12 +503,15 @@ def recommend_houses(payload: HouseRecommendRequest, db: Session) -> HouseRecomm
         median_commute = median(commute_values) if commute_values else None
         affordable_count = sum(1 for i in items if float(i.model.unit_price) <= affordable_unit_price)
         affordable_ratio = affordable_count / len(items) if items else 0.0
+        avg_access = mean(i.access_score for i in items)
+        avg_e2sfca = mean(i.e2sfca_score for i in items)
+        avg_calibrated = mean(i.calibrated_score for i in items)
         risks = [
-            "街道推荐基于当前抓取样本，不代表该街道全量在售房源。",
-            "挂牌价格不等同于最终成交价。",
+            "街道层级结果基于样本聚合，不能代表具体小区实时成交情况。",
+            "房价为样本均值，可能与挂牌价和成交价存在偏差。",
         ]
         if not commute_values:
-            risks.append("该街道暂未获取有效通勤时间样本。")
+            risks.append("未能获取有效通勤时间，建议在地图软件中复核。")
         street_rows.append(
             StreetRecommendation(
                 district=district,
@@ -392,6 +520,11 @@ def recommend_houses(payload: HouseRecommendRequest, db: Session) -> HouseRecomm
                 median_commute_minutes=round(float(median_commute), 1) if median_commute is not None else None,
                 house_count=len(items),
                 affordable_ratio=round(_clamp(affordable_ratio), 4),
+                score_breakdown={
+                    "avg_access": round(avg_access, 4),
+                    "avg_e2sfca": round(avg_e2sfca, 4),
+                    "avg_calibrated": round(avg_calibrated, 4),
+                },
                 reason=_street_reason(sub_district, median_commute, affordable_ratio),
                 risks=risks,
             )
@@ -400,7 +533,7 @@ def recommend_houses(payload: HouseRecommendRequest, db: Session) -> HouseRecomm
     street_rows.sort(key=lambda row: row.street_score, reverse=True)
     top_streets = street_rows[: payload.top_streets]
 
-    communities = _group_communities(candidates)
+    communities = _group_communities(candidates, version)
     community_rerank_diag = _apply_community_llm_rerank(payload=payload, communities=communities)
     top_communities = communities[: payload.top_communities]
     allowed_communities = {item.community_id for item in top_communities}
@@ -408,11 +541,11 @@ def recommend_houses(payload: HouseRecommendRequest, db: Session) -> HouseRecomm
     community_rows: list[CommunityRecommendation] = []
     for item in top_communities:
         risks = [
-            "当前小区推荐基于抓取样本，不代表该小区全部在售房源。",
-            "挂牌均价与成交价可能存在偏差，请结合实地看房。",
+            "小区推荐依赖样本覆盖度，可能存在部分房源缺失。",
+            "均价和通勤为估算值，建议结合实地看房复核。",
         ]
         if item.median_commute_minutes is None:
-            risks.append("该小区暂未获取稳定通勤时间样本。")
+            risks.append("该小区未能稳定获取通勤时间。")
         community_rows.append(
             CommunityRecommendation(
                 district=item.district,
@@ -431,6 +564,7 @@ def recommend_houses(payload: HouseRecommendRequest, db: Session) -> HouseRecomm
                 poi_score=round(item.poi_score, 4),
                 traffic_score=round(item.traffic_score, 4),
                 budget_match_score=round(item.budget_match_score, 4),
+                score_breakdown=item.breakdown,
                 reason=_community_reason(item),
                 risks=risks,
             )
@@ -438,29 +572,27 @@ def recommend_houses(payload: HouseRecommendRequest, db: Session) -> HouseRecomm
 
     house_rows_out: list[HouseRecommendation] = []
     for item in sorted(candidates, key=lambda x: x.final_score, reverse=True):
-        community_id = f"{item.model.district}|{item.model.sub_district or '未知'}|{item.model.community_name or '未知小区'}"
+        community_id = f"{item.model.district}|{item.model.sub_district or '未知街道'}|{item.model.community_name or '未知小区'}"
         if community_id not in allowed_communities:
             continue
         existing_count = sum(
             1
             for row in house_rows_out
             if row.district == item.model.district
-            and row.sub_district == (item.model.sub_district or "未知")
+            and row.sub_district == (item.model.sub_district or "未知街道")
             and row.community_name == (item.model.community_name or "未知小区")
         )
         if existing_count >= payload.top_houses_per_community:
             continue
-        risks = [
-            "房源详情可能随时间变化，请以最新挂牌信息为准。",
-        ]
+        risks = ["房源为样本推荐，请核验挂牌状态、产权和税费信息。"]
         if item.commute_minutes is None:
-            risks.append("未能获取该房源有效通勤时间。")
+            risks.append("该房源未获取到有效通勤时间。")
 
         house_rows_out.append(
             HouseRecommendation(
                 house_id=str(item.model.house_id or item.model.id),
                 district=item.model.district,
-                sub_district=item.model.sub_district or "未知",
+                sub_district=item.model.sub_district or "未知街道",
                 community_name=item.model.community_name,
                 title=item.model.title,
                 area=float(item.model.area) if item.model.area is not None else None,
@@ -471,22 +603,18 @@ def recommend_houses(payload: HouseRecommendRequest, db: Session) -> HouseRecomm
                 rule_score=round(item.rule_score, 4),
                 llm_score=round(item.llm_score, 4) if item.llm_score is not None else None,
                 llm_confidence=round(item.llm_confidence, 4) if item.llm_confidence is not None else None,
-                community_score=next(
-                    (
-                        round(c.final_score, 4)
-                        for c in top_communities
-                        if c.community_id == community_id
-                    ),
-                    None,
-                ),
+                community_score=next((round(c.final_score, 4) for c in top_communities if c.community_id == community_id), None),
+                score_breakdown=item.breakdown,
                 reason=_house_reason(item),
                 risks=risks,
             )
         )
 
     summary: dict[str, float | int | str | bool | None] = {
+        "feature_version_used": version,
         "candidate_houses": len(candidates),
         "route_calls": route_calls,
+        "route_success_count": route_success_count,
         "affordable_unit_price": round(affordable_unit_price, 2),
         "top_street_count": len(top_streets),
         "top_community_count": len(top_communities),
@@ -501,6 +629,9 @@ def recommend_houses(payload: HouseRecommendRequest, db: Session) -> HouseRecomm
         "community_rerank_success_count": community_rerank_diag["community_rerank_success_count"],
         "community_rerank_latency_ms": community_rerank_diag["community_rerank_latency_ms"],
         "community_rerank_error": community_rerank_diag["community_rerank_error"],
+        "amap_geocode_ok": bool(work_location is not None),
+        "amap_route_success_count": route_success_count,
+        "amap_route_failure_count": max(0, route_calls - route_success_count),
     }
     if work_location_str is None:
         summary["geocode_warning"] = "work_address_geocode_failed_or_unavailable"
@@ -514,4 +645,3 @@ def recommend_houses(payload: HouseRecommendRequest, db: Session) -> HouseRecomm
         houses=house_rows_out,
         summary=summary,
     )
-

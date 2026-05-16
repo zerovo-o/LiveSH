@@ -1,30 +1,5 @@
 export type CommuteMode = "transit" | "driving";
 
-export type AgentRecommendRequest = {
-  budget_wan: number;
-  target_area: number;
-  work_address: string;
-  commute_mode: CommuteMode;
-  max_commute_minutes: number;
-  top_k: number;
-};
-
-export type DistrictRecommendation = {
-  district: string;
-  score: number;
-  commute_minutes: number | null;
-  avg_price: number | null;
-  avg_total_price: number | null;
-  house_count: number | null;
-  reason: string;
-  risks: string[];
-};
-
-export type AgentRecommendResponse = {
-  work_location: string | null;
-  recommendations: DistrictRecommendation[];
-};
-
 export type HouseRecommendRequest = {
   budget_wan: number;
   target_area: number;
@@ -47,6 +22,7 @@ export type StreetRecommendation = {
   median_commute_minutes: number | null;
   house_count: number;
   affordable_ratio: number;
+  score_breakdown?: Record<string, number> | null;
   reason: string;
   risks: string[];
 };
@@ -66,6 +42,7 @@ export type HouseRecommendation = {
   llm_score?: number | null;
   llm_confidence?: number | null;
   community_score?: number | null;
+  score_breakdown?: Record<string, number> | null;
   reason: string;
   risks: string[];
 };
@@ -85,6 +62,7 @@ export type CommunityRecommendation = {
   poi_score: number;
   traffic_score: number;
   budget_match_score: number;
+  score_breakdown?: Record<string, number> | null;
   reason: string;
   risks: string[];
 };

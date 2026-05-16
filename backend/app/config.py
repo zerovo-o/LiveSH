@@ -24,3 +24,8 @@ else:
 LLM_RERANK_WEIGHT = float(os.getenv("LLM_RERANK_WEIGHT", "0.3"))
 LLM_RERANK_TIMEOUT_SEC = int(os.getenv("LLM_RERANK_TIMEOUT_SEC", "60"))
 LLM_RERANK_MAX_CANDIDATES = int(os.getenv("LLM_RERANK_MAX_CANDIDATES", "12"))
+
+# Recommender algorithm version switch:
+# - v1: legacy weighted rules (budget/commute/poi/convenience)
+# - v2: upgraded rules with access/e2sfca/calibrated signals
+RECOMMENDER_VERSION = os.getenv("RECOMMENDER_VERSION", "v1").strip().lower()
