@@ -30,7 +30,7 @@ def health() -> dict[str, str]:
 
 @app.get("/api/districts", response_model=list[DistrictMetricOut])
 def list_districts(db: Session = Depends(get_db)):
-    return db.scalars(select(DistrictMetric).order_by(DistrictMetric.livability_score.desc())).all()
+    return db.scalars(select(DistrictMetric).order_by(DistrictMetric.calibrated_score_life_circle.desc())).all()
 
 
 @app.get("/api/districts/{district}", response_model=DistrictMetricOut)
@@ -46,7 +46,7 @@ def list_streets(district: str | None = None, db: Session = Depends(get_db)):
     statement = select(StreetMetric)
     if district:
         statement = statement.where(StreetMetric.district == district)
-    return db.scalars(statement.order_by(StreetMetric.livability_score.desc())).all()
+    return db.scalars(statement.order_by(StreetMetric.calibrated_score_life_circle.desc())).all()
 
 
 @app.get("/api/streets/{district}/{street}", response_model=StreetMetricOut)
@@ -65,7 +65,8 @@ def summary(db: Session = Depends(get_db)):
     categories = db.scalars(select(PoiCategoryMetric).order_by(PoiCategoryMetric.count.desc())).all()
     price_top10 = sorted(districts, key=lambda x: x.avg_price, reverse=True)[:10]
     shopping_top5 = sorted(districts, key=lambda x: x.shopping_count, reverse=True)[:5]
-    score_ranking = sorted(districts, key=lambda x: x.livability_score, reverse=True)
+    score_ranking = sorted(districts, key=lambda x: x.calibrated_score_life_circle, reverse=True)
+    recommendations = [item for item in score_ranking if item.house_count >= 50]
     return {
         "districts": districts,
         "poi_categories": categories,
@@ -73,7 +74,7 @@ def summary(db: Session = Depends(get_db)):
         "shopping_top5": shopping_top5,
         "score_ranking": score_ranking,
         "scatter": districts,
-        "recommendations": score_ranking[:3],
+        "recommendations": recommendations[:5],
     }
 
 
@@ -93,7 +94,7 @@ def ai_advice(payload: AIAdviceRequest, db: Session = Depends(get_db)):
     if district:
         metric = db.get(DistrictMetric, district)
     else:
-        metric = db.scalars(select(DistrictMetric).order_by(DistrictMetric.livability_score.desc())).first()
+        metric = db.scalars(select(DistrictMetric).order_by(DistrictMetric.calibrated_score_life_circle.desc())).first()
     if not metric:
         raise HTTPException(status_code=404, detail="district not found")
     prompt, advice, is_placeholder = generate_ai_advice(metric)
