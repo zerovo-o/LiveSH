@@ -48,6 +48,14 @@ class DistrictMetricOut(BaseModel):
     e2sfca_value_score: float
     sample_reliability_score: float
     calibrated_score: float
+    life_circle_5min_score: float
+    life_circle_10min_score: float
+    life_circle_15min_score: float
+    life_circle_score: float
+    life_circle_5min_coverage: float
+    life_circle_10min_coverage: float
+    life_circle_15min_coverage: float
+    calibrated_score_life_circle: float
     center_lng: float | None = None
     center_lat: float | None = None
 
@@ -108,6 +116,14 @@ class StreetMetricOut(BaseModel):
     e2sfca_value_score: float
     sample_reliability_score: float
     calibrated_score: float
+    life_circle_5min_score: float
+    life_circle_10min_score: float
+    life_circle_15min_score: float
+    life_circle_score: float
+    life_circle_5min_coverage: float
+    life_circle_10min_coverage: float
+    life_circle_15min_coverage: float
+    calibrated_score_life_circle: float
     center_lng: float | None = None
     center_lat: float | None = None
 

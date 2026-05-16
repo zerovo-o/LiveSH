@@ -90,7 +90,7 @@ function App() {
             </div>
             <p className="mx-auto mt-7 max-w-3xl text-lg leading-8 text-[#6e5543]">
               把二手房挂牌价格与购物、交通、医疗、休闲、企业等 POI 数据放到同一张城市空间底图上，
-              用区级尺度衡量“生活便利”与“居住成本”的相对关系
+              从区级、街镇级和房源点周边可达性三个层次观察“生活便利”与“居住成本”的相对关系
             </p>
           </div>
 
@@ -100,9 +100,9 @@ function App() {
                 打分逻辑
               </div>
               <div className="space-y-3 text-base leading-7 text-[#6e5543]">
-                <p>商圈活跃度由购物、交通、医疗、休闲与企业 POI 加权得到</p>
-                <p>综合评分 = 标准化商圈活跃度 - 标准化房价</p>
-                <p>分数越高，代表生活便利性相对更强，同时居住成本压力相对更低</p>
+                <p>稳健评分综合服务供需比、POI 多样性与房价负担</p>
+                <p>供需可达性衡量设施供给覆盖周边居住需求的能力</p>
+                <p>校准评分作为默认推荐依据，并按样本可信度对排名降权</p>
               </div>
               <div className="mx-auto mt-8 flex max-w-2xl flex-wrap justify-center gap-4 text-2xl font-black md:text-4xl">
                 <div className="rounded-[1.35rem] bg-[#fff4df]/82 px-8 py-4 text-[#c06a1a] shadow-[0_14px_34px_rgba(192,106,26,0.12)]">成本</div>
@@ -125,7 +125,7 @@ function App() {
       <div className="mx-auto max-w-[1440px] px-4 pb-6 pt-4 md:px-8 xl:px-10">
       <section id="map-gis" className="mx-auto grid h-[calc(100vh-4rem)] min-h-[560px] max-w-[1360px] scroll-mt-5 grid-cols-1 gap-3 rounded-[22px] border border-[#ead8c2] bg-white/70 p-3 shadow-[0_24px_80px_rgba(104,72,42,0.12)] xl:grid-cols-[320px_minmax(0,1fr)]">
         <RecommendationSection
-          recommendations={summary.score_ranking.slice(0, 5)}
+          recommendations={summary.recommendations}
           onSelectDistrict={setSelectedDistrict}
           compact
         />
@@ -133,7 +133,7 @@ function App() {
           <MapPanel
             districts={summary.districts}
             selectedDistrict={selectedDistrict}
-            recommendations={summary.score_ranking.slice(0, 5)}
+            recommendations={summary.recommendations}
             onSelectDistrict={setSelectedDistrict}
           />
         </div>
@@ -182,7 +182,7 @@ function RecommendationSection({
     <section className="flex min-h-0 flex-col rounded-[18px] border border-[#ead8c2] bg-[#fffaf1]/92 p-4 shadow-[0_18px_56px_rgba(104,72,42,0.10)]">
       <div className="flex items-center justify-between">
         <h2 className="text-lg font-semibold text-[#33251f]">推荐区域 Top5</h2>
-        <Badge variant="outline" className="border-[#f3c99a] bg-[#fff4df] text-[#9a5a1d]">综合评分排序</Badge>
+        <Badge variant="outline" className="border-[#bfe6d6] bg-[#eefbf4] text-[#21745d]">校准评分排序</Badge>
       </div>
       <div className={`mt-4 min-h-0 gap-3 ${compact ? "flex flex-1 flex-col overflow-y-auto pr-1" : "grid grid-cols-1 md:grid-cols-2 xl:grid-cols-5"}`}>
         {recommendations.map((item, index) => (
@@ -196,7 +196,7 @@ function RecommendationSection({
                 <span>
                   {index + 1}. {item.district}
                 </span>
-                <Badge className="shrink-0 bg-[#33a985] text-white">评分 {formatScore(item.livability_score)}</Badge>
+                <Badge className="shrink-0 bg-[#33a985] text-white">评分 {formatScore(item.calibrated_score_life_circle)}</Badge>
               </CardTitle>
             </CardHeader>
             <CardContent>

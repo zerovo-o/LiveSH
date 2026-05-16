@@ -61,6 +61,16 @@ PHASE4_FIELDS = (
     "sample_reliability_score",
     "calibrated_score",
 )
+LIFE_CIRCLE_FIELDS = (
+    "life_circle_5min_score",
+    "life_circle_10min_score",
+    "life_circle_15min_score",
+    "life_circle_score",
+    "life_circle_5min_coverage",
+    "life_circle_10min_coverage",
+    "life_circle_15min_coverage",
+    "calibrated_score_life_circle",
+)
 
 
 @dataclass(frozen=True)
@@ -71,6 +81,21 @@ class AccessConfig:
     beta_m: float
 
 
+@dataclass(frozen=True)
+class LifeCircleConfig:
+    minutes: int
+    score_field: str
+    coverage_field: str
+    access_field: str
+    diversity_field: str
+    radius_m: float
+    beta_m: float
+    required_subtypes: tuple[str, ...]
+    coverage_weight: float
+    access_weight: float
+    diversity_weight: float
+
+
 ACCESS_CONFIGS = (
     AccessConfig("购物", "shopping_access", 1000.0, 500.0),
     AccessConfig("交通", "traffic_access", 800.0, 400.0),
@@ -78,6 +103,81 @@ ACCESS_CONFIGS = (
     AccessConfig("休闲娱乐", "recreation_access", 1500.0, 750.0),
     AccessConfig("公司企业", "company_access", 2000.0, 1000.0),
 )
+
+BASIC_DAILY_SUBTYPES = (
+    "convenience_store",
+    "supermarket",
+    "bus_stop",
+    "pharmacy",
+)
+DAILY_COMPLETE_SUBTYPES = (
+    "market",
+    "metro_station",
+    "clinic",
+    "park_scenic",
+    "sports_fitness",
+    "food_social",
+    "cafe_tea",
+)
+CITY_RESOURCE_SUBTYPES = (
+    "shopping_mall",
+    "general_hospital",
+    "specialized_hospital",
+    "emergency",
+    "culture_venue",
+    "cinema_theater",
+    "business_park",
+    "office_company",
+    "rail_station",
+    "coach_station",
+)
+
+LIFE_CIRCLE_CONFIGS = (
+    LifeCircleConfig(
+        minutes=5,
+        score_field="life_circle_5min_score",
+        coverage_field="life_circle_5min_coverage",
+        access_field="life_circle_5min_access",
+        diversity_field="life_circle_5min_diversity",
+        radius_m=320.0,
+        beta_m=160.0,
+        required_subtypes=BASIC_DAILY_SUBTYPES,
+        coverage_weight=0.45,
+        access_weight=0.35,
+        diversity_weight=0.20,
+    ),
+    LifeCircleConfig(
+        minutes=10,
+        score_field="life_circle_10min_score",
+        coverage_field="life_circle_10min_coverage",
+        access_field="life_circle_10min_access",
+        diversity_field="life_circle_10min_diversity",
+        radius_m=640.0,
+        beta_m=320.0,
+        required_subtypes=(*BASIC_DAILY_SUBTYPES, *DAILY_COMPLETE_SUBTYPES),
+        coverage_weight=0.40,
+        access_weight=0.40,
+        diversity_weight=0.20,
+    ),
+    LifeCircleConfig(
+        minutes=15,
+        score_field="life_circle_15min_score",
+        coverage_field="life_circle_15min_coverage",
+        access_field="life_circle_15min_access",
+        diversity_field="life_circle_15min_diversity",
+        radius_m=960.0,
+        beta_m=480.0,
+        required_subtypes=(*BASIC_DAILY_SUBTYPES, *DAILY_COMPLETE_SUBTYPES, *CITY_RESOURCE_SUBTYPES),
+        coverage_weight=0.35,
+        access_weight=0.45,
+        diversity_weight=0.20,
+    ),
+)
+LIFE_CIRCLE_HOUSE_FIELDS = tuple(
+    field
+    for config in LIFE_CIRCLE_CONFIGS
+    for field in (config.access_field, config.diversity_field, config.coverage_field, config.score_field)
+) + ("life_circle_score",)
 
 HOUSE_FEATURE_COLUMNS = (
     "house_id",
@@ -102,6 +202,16 @@ HOUSE_PHASE4_FEATURE_COLUMNS = (
     *E2SFCA_ACCESS_FIELDS,
     "house_e2sfca_access_score",
     "house_e2sfca_value_score",
+)
+HOUSE_LIFE_CIRCLE_FEATURE_COLUMNS = (
+    "house_id",
+    "district",
+    "street",
+    "wgs84_lng",
+    "wgs84_lat",
+    "gcj02_lng",
+    "gcj02_lat",
+    *LIFE_CIRCLE_HOUSE_FIELDS,
 )
 DEMAND_POINT_COLUMNS = (
     "source",
@@ -238,9 +348,9 @@ def add_phase1_scores(metrics: pd.DataFrame) -> pd.DataFrame:
         + 0.30 * minmax_series(df["business_activity"])
     )
     df["livability_score_v2"] = (
-        0.65 * df["service_score"]
+        0.72 * df["service_score"]
         + 0.20 * df["vitality_score"]
-        + 0.15 * df["affordability_score"]
+        + 0.08 * df["affordability_score"]
     )
 
     for field in PHASE1_FIELDS:
@@ -379,6 +489,160 @@ def compute_weighted_facility_access(
     return access
 
 
+def subtype_diversity(values: Mapping[str, float] | Sequence[float]) -> float:
+    if isinstance(values, Mapping):
+        raw_values = list(values.values())
+    else:
+        raw_values = list(values)
+    positives = [max(float(value or 0), 0.0) for value in raw_values]
+    total = sum(positives)
+    if total <= 0 or len(positives) <= 1:
+        return 0.0
+
+    entropy = 0.0
+    active_count = 0
+    for value in positives:
+        if value <= 0:
+            continue
+        active_count += 1
+        p = value / total
+        entropy -= p * log(p)
+    if active_count <= 1:
+        return 0.0
+    return float(entropy / log(len(positives)))
+
+
+def _compute_life_circle_metrics(
+    house_xy: np.ndarray,
+    poi_xy: np.ndarray,
+    poi_subtypes: Sequence[str],
+    poi_weights: Sequence[float] | np.ndarray,
+    config: LifeCircleConfig,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    length = len(house_xy)
+    access = np.zeros(length, dtype=float)
+    coverage = np.zeros(length, dtype=float)
+    diversity = np.zeros(length, dtype=float)
+    if length == 0 or len(poi_xy) == 0 or not config.required_subtypes:
+        return access, coverage, diversity
+
+    required = tuple(config.required_subtypes)
+    required_set = set(required)
+    subtype_array = np.asarray(poi_subtypes, dtype=object)
+    weight_array = np.asarray(poi_weights, dtype=float)
+    tree = cKDTree(poi_xy)
+
+    for start, end in _chunk_bounds(length):
+        neighbors = tree.query_ball_point(house_xy[start:end], r=config.radius_m)
+        for offset, neighbor_indexes in enumerate(neighbors):
+            if not neighbor_indexes:
+                continue
+            index = start + offset
+            distances = np.linalg.norm(poi_xy[neighbor_indexes] - house_xy[index], axis=1)
+            decay = decayed_access_from_distances(distances, config.beta_m)
+            weighted = weight_array[neighbor_indexes] * decay
+            subtypes = subtype_array[neighbor_indexes]
+            subtype_access = {subtype: 0.0 for subtype in required}
+            for subtype, contribution in zip(subtypes, weighted):
+                if subtype in required_set:
+                    subtype_access[str(subtype)] += float(contribution)
+            covered = sum(1 for value in subtype_access.values() if value > 0)
+            access[index] = float(sum(subtype_access.values()))
+            coverage[index] = covered / len(required)
+            diversity[index] = subtype_diversity(subtype_access)
+    return access, coverage, diversity
+
+
+def compute_life_circle_house_features(houses: pd.DataFrame, pois: pd.DataFrame) -> pd.DataFrame:
+    required_house_columns = {
+        "house_id",
+        "district",
+        "street",
+        "wgs84_lng",
+        "wgs84_lat",
+        "gcj02_lng",
+        "gcj02_lat",
+    }
+    required_poi_columns = {
+        "poi_subtype",
+        "is_life_service",
+        "supply_weight",
+        "wgs84_lng",
+        "wgs84_lat",
+    }
+    missing_house = required_house_columns - set(houses.columns)
+    missing_poi = required_poi_columns - set(pois.columns)
+    if missing_house:
+        raise ValueError(f"houses missing required columns: {sorted(missing_house)}")
+    if missing_poi:
+        raise ValueError(f"pois missing required columns: {sorted(missing_poi)}")
+
+    features = _valid_wgs84_points(houses).reset_index(drop=True)
+    if features.empty:
+        return pd.DataFrame(columns=HOUSE_LIFE_CIRCLE_FEATURE_COLUMNS)
+
+    valid_pois = _valid_wgs84_points(pois)
+    life_pois = valid_pois[
+        (numeric_series(valid_pois["is_life_service"]).fillna(0).astype(int) == 1)
+        & (numeric_series(valid_pois["supply_weight"]).fillna(0.0) > 0)
+        & valid_pois["poi_subtype"].notna()
+    ].copy()
+
+    house_xy = project_wgs84_to_meters(features["wgs84_lng"], features["wgs84_lat"])
+    poi_xy = (
+        project_wgs84_to_meters(life_pois["wgs84_lng"], life_pois["wgs84_lat"])
+        if not life_pois.empty
+        else np.empty((0, 2), dtype=float)
+    )
+    poi_subtypes = life_pois["poi_subtype"].astype(str).to_numpy(dtype=object) if not life_pois.empty else np.array([], dtype=object)
+    poi_weights = numeric_series(life_pois["supply_weight"]).fillna(0.0).to_numpy(dtype=float) if not life_pois.empty else np.array([], dtype=float)
+
+    for config in LIFE_CIRCLE_CONFIGS:
+        allowed = life_pois["poi_subtype"].isin(config.required_subtypes).to_numpy(dtype=bool) if not life_pois.empty else np.array([], dtype=bool)
+        access, coverage, diversity = _compute_life_circle_metrics(
+            house_xy,
+            poi_xy[allowed],
+            poi_subtypes[allowed],
+            poi_weights[allowed],
+            config,
+        )
+        features[config.access_field] = access
+        features[config.coverage_field] = coverage
+        features[config.diversity_field] = diversity
+
+    for config in LIFE_CIRCLE_CONFIGS:
+        features[config.score_field] = (
+            config.coverage_weight * numeric_series(features[config.coverage_field]).fillna(0.0)
+            + config.access_weight * minmax_series(features[config.access_field])
+            + config.diversity_weight * numeric_series(features[config.diversity_field]).fillna(0.0)
+        ).clip(0.0, 1.0)
+
+    features["life_circle_score"] = (
+        0.40 * features["life_circle_5min_score"]
+        + 0.35 * features["life_circle_10min_score"]
+        + 0.25 * features["life_circle_15min_score"]
+    ).clip(0.0, 1.0)
+
+    score_like_fields = {
+        "life_circle_5min_score",
+        "life_circle_10min_score",
+        "life_circle_15min_score",
+        "life_circle_score",
+        "life_circle_5min_coverage",
+        "life_circle_10min_coverage",
+        "life_circle_15min_coverage",
+        "life_circle_5min_diversity",
+        "life_circle_10min_diversity",
+        "life_circle_15min_diversity",
+    }
+    for field in LIFE_CIRCLE_HOUSE_FIELDS:
+        values = numeric_series(features[field]).fillna(0.0)
+        if field in score_like_fields:
+            values = values.clip(0.0, 1.0)
+        features[field] = values.astype(float)
+    return features[list(HOUSE_LIFE_CIRCLE_FEATURE_COLUMNS)]
+
+
 def compute_house_features(houses: pd.DataFrame, pois: pd.DataFrame) -> pd.DataFrame:
     required_house_columns = {
         "house_id",
@@ -441,8 +705,8 @@ def compute_house_features(houses: pd.DataFrame, pois: pd.DataFrame) -> pd.DataF
     log_unit_prices.loc[positive_prices] = np.log(unit_prices.loc[positive_prices])
     features["house_affordability_score"] = (1.0 - percentile_rank(log_unit_prices)).clip(0.0, 1.0)
     features["house_value_score"] = (
-        0.65 * features["house_access_score"]
-        + 0.35 * features["house_affordability_score"]
+        0.80 * features["house_access_score"]
+        + 0.20 * features["house_affordability_score"]
     )
 
     for field in (
@@ -521,8 +785,8 @@ def compute_e2sfca_house_features(
         + 0.15 * minmax_series(features["company_e2sfca_access"])
     )
     features["house_e2sfca_value_score"] = (
-        0.65 * features["house_e2sfca_access_score"]
-        + 0.35 * features["house_affordability_score"]
+        0.80 * features["house_e2sfca_access_score"]
+        + 0.20 * features["house_affordability_score"]
     )
 
     for field in (*E2SFCA_ACCESS_FIELDS, "house_e2sfca_access_score", "house_e2sfca_value_score"):
@@ -619,11 +883,68 @@ def attach_phase4_scores(
     threshold = max(float(reliability_house_threshold), 1.0)
     df["sample_reliability_score"] = (numeric_series(df["house_count"]).fillna(0.0) / threshold).clip(0.0, 1.0)
     df["calibrated_score"] = (
-        0.50 * numeric_series(df["livability_score_v2"]).fillna(0.0)
-        + 0.35 * df["e2sfca_access_score"]
+        0.42 * numeric_series(df["livability_score_v2"]).fillna(0.0)
+        + 0.43 * df["e2sfca_access_score"]
         + 0.15 * numeric_series(df["value_score"]).fillna(0.0)
     ) * df["sample_reliability_score"]
 
     for field in PHASE4_FIELDS:
         df[field] = numeric_series(df[field]).fillna(0.0).astype(float)
+    return df
+
+
+def aggregate_life_circle_features(house_features: pd.DataFrame, group_cols: Sequence[str]) -> pd.DataFrame:
+    columns = list(group_cols) + [
+        "life_circle_5min_score",
+        "life_circle_10min_score",
+        "life_circle_15min_score",
+        "life_circle_score",
+        "life_circle_5min_coverage",
+        "life_circle_10min_coverage",
+        "life_circle_15min_coverage",
+    ]
+    if house_features.empty:
+        return pd.DataFrame(columns=columns)
+
+    valid = house_features.dropna(subset=list(group_cols)).copy()
+    if valid.empty:
+        return pd.DataFrame(columns=columns)
+
+    grouped = valid.groupby(list(group_cols)).agg(
+        life_circle_5min_score=("life_circle_5min_score", "mean"),
+        life_circle_10min_score=("life_circle_10min_score", "mean"),
+        life_circle_15min_score=("life_circle_15min_score", "mean"),
+        life_circle_score=("life_circle_score", "mean"),
+        life_circle_5min_coverage=("life_circle_5min_coverage", "mean"),
+        life_circle_10min_coverage=("life_circle_10min_coverage", "mean"),
+        life_circle_15min_coverage=("life_circle_15min_coverage", "mean"),
+    )
+    return grouped.reset_index()[columns]
+
+
+def attach_life_circle_scores(metrics: pd.DataFrame, house_features: pd.DataFrame, group_cols: Sequence[str]) -> pd.DataFrame:
+    df = metrics.copy()
+    aggregated = aggregate_life_circle_features(house_features, group_cols)
+    if not aggregated.empty:
+        df = df.merge(aggregated, on=list(group_cols), how="left")
+    else:
+        for field in LIFE_CIRCLE_FIELDS:
+            if field != "calibrated_score_life_circle":
+                df[field] = np.nan
+
+    for field in LIFE_CIRCLE_FIELDS:
+        if field == "calibrated_score_life_circle":
+            continue
+        df[field] = numeric_series(df.get(field, pd.Series(index=df.index, dtype=float))).fillna(0.0).clip(0.0, 1.0)
+
+    base_score = (
+        0.30 * numeric_series(df["livability_score_v2"]).fillna(0.0)
+        + 0.30 * numeric_series(df["e2sfca_access_score"]).fillna(0.0)
+        + 0.30 * df["life_circle_score"]
+        + 0.10 * numeric_series(df["value_score"]).fillna(0.0)
+    ) * numeric_series(df["sample_reliability_score"]).fillna(0.0)
+    df["calibrated_score_life_circle"] = base_score * (0.6 + 0.4 * df["life_circle_score"])
+
+    for field in LIFE_CIRCLE_FIELDS:
+        df[field] = numeric_series(df[field]).fillna(0.0).clip(0.0, 1.0).astype(float)
     return df

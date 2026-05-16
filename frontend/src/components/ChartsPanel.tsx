@@ -33,7 +33,11 @@ type MetricKey =
   | "recreation_count"
   | "company_count"
   | "business_activity"
-  | "livability_score";
+  | "livability_score"
+  | "livability_score_v2"
+  | "e2sfca_access_score"
+  | "calibrated_score"
+  | "calibrated_score_life_circle";
 
 const axisText = { color: "#7b6758", fontSize: 11 };
 const grid = { top: 20, left: 46, right: 18, bottom: 46 };
@@ -47,7 +51,7 @@ const relationMetrics: { key: MetricKey; label: string }[] = [
   { key: "healthcare_count", label: "医疗" },
   { key: "recreation_count", label: "休闲" },
   { key: "business_activity", label: "活跃度" },
-  { key: "livability_score", label: "评分" }
+  { key: "calibrated_score_life_circle", label: "校准评分" }
 ];
 
 const poiStackFields: { key: MetricKey; label: string; color: string }[] = [
@@ -66,7 +70,8 @@ const radarFields: { key: MetricKey; label: string; inverse?: boolean }[] = [
   { key: "healthcare_count", label: "医疗" },
   { key: "recreation_count", label: "休闲" },
   { key: "business_activity", label: "活跃度" },
-  { key: "livability_score", label: "综合评分" }
+  { key: "e2sfca_access_score", label: "供需可达" },
+  { key: "calibrated_score_life_circle", label: "校准评分" }
 ];
 
 const ChartsPanel = memo(function ChartsPanel({
@@ -168,8 +173,8 @@ const ChartsPanel = memo(function ChartsPanel({
           type: "bar",
           data: scoreRanking.map((d) => ({
             name: d.district,
-            value: Number(d.livability_score.toFixed(3)),
-            itemStyle: { color: d.district === selectedDistrict ? selectedColor : d.livability_score >= 0 ? "#31b78f" : "#ef6f61" }
+            value: Number(d.calibrated_score_life_circle.toFixed(3)),
+            itemStyle: { color: d.district === selectedDistrict ? selectedColor : scoreColor(d.calibrated_score_life_circle) }
           })),
           barMaxWidth: 18
         }
@@ -198,7 +203,7 @@ const ChartsPanel = memo(function ChartsPanel({
           data: scatter.map((d) => ({
             name: d.district,
             value: [d.avg_price, d.business_activity, d.poi_total],
-            itemStyle: { color: d.district === selectedDistrict ? selectedColor : scoreColor(d.livability_score) }
+            itemStyle: { color: d.district === selectedDistrict ? selectedColor : scoreColor(d.calibrated_score_life_circle) }
           })),
           markLine: {
             silent: true,
@@ -267,10 +272,10 @@ const ChartsPanel = memo(function ChartsPanel({
 
   const scoreHistogramOption = useMemo<EChartsOption>(() => {
     const bins = [
-      { name: "低分", min: -Infinity, max: -0.2, color: "#ef6f61" },
-      { name: "中低", min: -0.2, max: 0, color: "#f59e0b" },
-      { name: "中高", min: 0, max: 0.2, color: "#31b78f" },
-      { name: "高分", min: 0.2, max: Infinity, color: "#16a3b8" }
+      { name: "低分", min: -Infinity, max: 0.15, color: "#ef6f61" },
+      { name: "中低", min: 0.15, max: 0.3, color: "#f59e0b" },
+      { name: "中高", min: 0.3, max: 0.45, color: "#31b78f" },
+      { name: "高分", min: 0.45, max: Infinity, color: "#16a3b8" }
     ];
     return {
       grid,
@@ -282,7 +287,7 @@ const ChartsPanel = memo(function ChartsPanel({
           type: "bar",
           barMaxWidth: 34,
           data: bins.map((bin) => ({
-            value: scatter.filter((d) => d.livability_score >= bin.min && d.livability_score < bin.max).length,
+            value: scatter.filter((d) => d.calibrated_score_life_circle >= bin.min && d.calibrated_score_life_circle < bin.max).length,
             itemStyle: { color: bin.color }
           }))
         }
@@ -330,7 +335,7 @@ const ChartsPanel = memo(function ChartsPanel({
       { key: "avg_price", label: "房价" },
       { key: "poi_total", label: "POI" },
       { key: "business_activity", label: "活跃度" },
-      { key: "livability_score", label: "评分" }
+      { key: "calibrated_score_life_circle", label: "校准评分" }
     ];
     const ranges = buildRanges(scatter, fields.map((field) => field.key));
     return {
@@ -346,7 +351,7 @@ const ChartsPanel = memo(function ChartsPanel({
       tooltip: {
         formatter: (params: any) => {
           const row = scatter[params.dataIndex];
-          return row ? `${row.district}<br/>房价 ${Math.round(row.avg_price).toLocaleString("zh-CN")} 元/㎡<br/>POI ${row.poi_total.toLocaleString("zh-CN")}<br/>活跃度 ${row.business_activity.toFixed(1)}<br/>评分 ${row.livability_score.toFixed(3)}` : "";
+          return row ? `${row.district}<br/>房价 ${Math.round(row.avg_price).toLocaleString("zh-CN")} 元/㎡<br/>POI ${row.poi_total.toLocaleString("zh-CN")}<br/>活跃度 ${row.business_activity.toFixed(1)}<br/>校准评分 ${row.calibrated_score_life_circle.toFixed(3)}` : "";
         }
       },
       series: [
@@ -357,7 +362,7 @@ const ChartsPanel = memo(function ChartsPanel({
             name: d.district,
             value: fields.map((field) => Number(d[field.key])),
             lineStyle: {
-              color: d.district === selectedDistrict ? selectedColor : scoreColor(d.livability_score),
+              color: d.district === selectedDistrict ? selectedColor : scoreColor(d.calibrated_score_life_circle),
               opacity: d.district === selectedDistrict ? 0.95 : 0.42,
               width: d.district === selectedDistrict ? 4 : 2
             }
@@ -395,10 +400,10 @@ const ChartsPanel = memo(function ChartsPanel({
               <ChartCard title="房价 Top10 区域">
                 <EChart option={priceOption} className="h-72 w-full" onClick={handleChartClick} />
               </ChartCard>
-              <ChartCard title="宜居性评分排名">
+              <ChartCard title="校准评分排名">
                 <EChart option={scoreOption} className="h-72 w-full" onClick={handleChartClick} />
               </ChartCard>
-              <ChartCard title="评分区间分布">
+              <ChartCard title="校准评分区间分布">
                 <EChart option={scoreHistogramOption} className="h-64 w-full" />
               </ChartCard>
               <ChartCard title="房价与便利性象限">
@@ -412,7 +417,7 @@ const ChartsPanel = memo(function ChartsPanel({
               <ChartCard title="POI类别占比">
                 <EChart option={poiOption} className="h-72 w-full" />
               </ChartCard>
-              <ChartCard title="高评分区域 POI 结构">
+              <ChartCard title="校准评分较高区域 POI 结构">
                 <EChart option={poiStackOption} className="h-72 w-full" onClick={handleChartClick} />
               </ChartCard>
               <ChartCard title="购物数量 Top5 区域">
@@ -446,10 +451,10 @@ const ChartsPanel = memo(function ChartsPanel({
               <ChartCard title="选中区域 vs 全市均值">
                 <EChart option={radarOption} className="h-80 w-full" />
               </ChartCard>
-              <ChartCard title="评分区间分布">
+              <ChartCard title="校准评分区间分布">
                 <EChart option={scoreHistogramOption} className="h-80 w-full" />
               </ChartCard>
-              <ChartCard title="宜居性评分排名">
+              <ChartCard title="校准评分排名">
                 <EChart option={scoreOption} className="h-[28rem] w-full" onClick={handleChartClick} />
               </ChartCard>
               <ChartCard title="指标相关性热力图">
@@ -474,9 +479,10 @@ function ChartCard({ title, children }: { title: string; children: ReactNode }) 
   );
 }
 
-function average(items: DistrictMetric[], key: MetricKey) {
-  if (!items.length) return 0;
-  return items.reduce((sum, item) => sum + Number(item[key]), 0) / items.length;
+function average(items: DistrictMetric[], key: keyof DistrictMetric) {
+  const values = items.map((item) => Number(item[key])).filter((value) => Number.isFinite(value));
+  if (!values.length) return 0;
+  return values.reduce((sum, value) => sum + value, 0) / values.length;
 }
 
 function pearson(items: DistrictMetric[], xKey: MetricKey, yKey: MetricKey) {
@@ -534,6 +540,43 @@ function buildAverageMetric(items: DistrictMetric[]): DistrictMetric {
     activity_norm: base?.activity_norm ?? 0,
     price_norm: base?.price_norm ?? 0,
     livability_score: average(items, "livability_score"),
+    poi_diversity: average(items, "poi_diversity"),
+    shopping_per_house: average(items, "shopping_per_house"),
+    traffic_per_house: average(items, "traffic_per_house"),
+    healthcare_per_house: average(items, "healthcare_per_house"),
+    recreation_per_house: average(items, "recreation_per_house"),
+    company_per_house: average(items, "company_per_house"),
+    cost_pressure: average(items, "cost_pressure"),
+    affordability_score: average(items, "affordability_score"),
+    service_score: average(items, "service_score"),
+    vitality_score: average(items, "vitality_score"),
+    livability_score_v2: average(items, "livability_score_v2"),
+    shopping_access: average(items, "shopping_access"),
+    traffic_access: average(items, "traffic_access"),
+    healthcare_access: average(items, "healthcare_access"),
+    recreation_access: average(items, "recreation_access"),
+    company_access: average(items, "company_access"),
+    nearest_traffic_distance: average(items, "nearest_traffic_distance"),
+    nearest_healthcare_distance: average(items, "nearest_healthcare_distance"),
+    access_score: average(items, "access_score"),
+    value_score: average(items, "value_score"),
+    shopping_e2sfca_access: average(items, "shopping_e2sfca_access"),
+    traffic_e2sfca_access: average(items, "traffic_e2sfca_access"),
+    healthcare_e2sfca_access: average(items, "healthcare_e2sfca_access"),
+    recreation_e2sfca_access: average(items, "recreation_e2sfca_access"),
+    company_e2sfca_access: average(items, "company_e2sfca_access"),
+    e2sfca_access_score: average(items, "e2sfca_access_score"),
+    e2sfca_value_score: average(items, "e2sfca_value_score"),
+    sample_reliability_score: average(items, "sample_reliability_score"),
+    calibrated_score: average(items, "calibrated_score"),
+    life_circle_5min_score: average(items, "life_circle_5min_score"),
+    life_circle_10min_score: average(items, "life_circle_10min_score"),
+    life_circle_15min_score: average(items, "life_circle_15min_score"),
+    life_circle_score: average(items, "life_circle_score"),
+    life_circle_5min_coverage: average(items, "life_circle_5min_coverage"),
+    life_circle_10min_coverage: average(items, "life_circle_10min_coverage"),
+    life_circle_15min_coverage: average(items, "life_circle_15min_coverage"),
+    calibrated_score_life_circle: average(items, "calibrated_score_life_circle"),
     center_lng: null,
     center_lat: null
   };
