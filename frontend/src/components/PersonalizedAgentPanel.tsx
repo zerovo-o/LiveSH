@@ -26,6 +26,12 @@ const DEFAULT_FORM: HouseRecommendRequest = {
   top_houses_per_community: 3,
   healthcare_weight: 1.2,
   shopping_weight: 1.1,
+  daily_life_weight: 1.0,
+  commute_facility_weight: 1.0,
+  medical_weight: 1.0,
+  education_weight: 0.8,
+  recreation_weight: 0.8,
+  employment_weight: 0.6,
   max_route_calls: 120
 };
 
@@ -58,6 +64,12 @@ export default function PersonalizedAgentPanel() {
         top_houses_per_community: Number(form.top_houses_per_community),
         healthcare_weight: Number(form.healthcare_weight),
         shopping_weight: Number(form.shopping_weight),
+        daily_life_weight: Number(form.daily_life_weight),
+        commute_facility_weight: Number(form.commute_facility_weight),
+        medical_weight: Number(form.medical_weight),
+        education_weight: Number(form.education_weight),
+        recreation_weight: Number(form.recreation_weight),
+        employment_weight: Number(form.employment_weight),
         max_route_calls: Number(form.max_route_calls)
       };
       const response = await recommendHouses(payload);
@@ -186,6 +198,93 @@ export default function PersonalizedAgentPanel() {
               value={form.shopping_weight}
               onChange={(event) =>
                 setForm((prev) => ({ ...prev, shopping_weight: Number(event.target.value) || 0 }))
+              }
+            />
+          </Field>
+        </div>
+
+        <div className="grid grid-cols-2 gap-2">
+          <Field label="日常便利权重">
+            <input
+              className="h-9 w-full rounded-lg border border-[#ead8c2] bg-white px-3 text-sm text-[#33251f] outline-none focus:border-[#f3c99a]"
+              type="number"
+              min={0}
+              max={3}
+              step={0.1}
+              value={form.daily_life_weight}
+              onChange={(event) =>
+                setForm((prev) => ({ ...prev, daily_life_weight: Number(event.target.value) || 0 }))
+              }
+            />
+          </Field>
+          <Field label="交通设施权重">
+            <input
+              className="h-9 w-full rounded-lg border border-[#ead8c2] bg-white px-3 text-sm text-[#33251f] outline-none focus:border-[#f3c99a]"
+              type="number"
+              min={0}
+              max={3}
+              step={0.1}
+              value={form.commute_facility_weight}
+              onChange={(event) =>
+                setForm((prev) => ({ ...prev, commute_facility_weight: Number(event.target.value) || 0 }))
+              }
+            />
+          </Field>
+        </div>
+
+        <div className="grid grid-cols-2 gap-2">
+          <Field label="医疗服务权重">
+            <input
+              className="h-9 w-full rounded-lg border border-[#ead8c2] bg-white px-3 text-sm text-[#33251f] outline-none focus:border-[#f3c99a]"
+              type="number"
+              min={0}
+              max={3}
+              step={0.1}
+              value={form.medical_weight}
+              onChange={(event) =>
+                setForm((prev) => ({ ...prev, medical_weight: Number(event.target.value) || 0 }))
+              }
+            />
+          </Field>
+          <Field label="教育资源权重">
+            <input
+              className="h-9 w-full rounded-lg border border-[#ead8c2] bg-white px-3 text-sm text-[#33251f] outline-none focus:border-[#f3c99a]"
+              type="number"
+              min={0}
+              max={3}
+              step={0.1}
+              value={form.education_weight}
+              onChange={(event) =>
+                setForm((prev) => ({ ...prev, education_weight: Number(event.target.value) || 0 }))
+              }
+            />
+          </Field>
+        </div>
+
+        <div className="grid grid-cols-2 gap-2">
+          <Field label="休闲娱乐权重">
+            <input
+              className="h-9 w-full rounded-lg border border-[#ead8c2] bg-white px-3 text-sm text-[#33251f] outline-none focus:border-[#f3c99a]"
+              type="number"
+              min={0}
+              max={3}
+              step={0.1}
+              value={form.recreation_weight}
+              onChange={(event) =>
+                setForm((prev) => ({ ...prev, recreation_weight: Number(event.target.value) || 0 }))
+              }
+            />
+          </Field>
+          <Field label="就业机会权重">
+            <input
+              className="h-9 w-full rounded-lg border border-[#ead8c2] bg-white px-3 text-sm text-[#33251f] outline-none focus:border-[#f3c99a]"
+              type="number"
+              min={0}
+              max={3}
+              step={0.1}
+              value={form.employment_weight}
+              onChange={(event) =>
+                setForm((prev) => ({ ...prev, employment_weight: Number(event.target.value) || 0 }))
               }
             />
           </Field>

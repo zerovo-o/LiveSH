@@ -17,6 +17,12 @@ class HouseRecommendRequest(BaseModel):
     top_houses_per_community: int = Field(default=3, ge=1, le=10)
     healthcare_weight: float = Field(default=1.0, ge=0, le=3)
     shopping_weight: float = Field(default=1.0, ge=0, le=3)
+    daily_life_weight: float = Field(default=1.0, ge=0, le=3)
+    commute_facility_weight: float = Field(default=1.0, ge=0, le=3)
+    medical_weight: float = Field(default=1.0, ge=0, le=3)
+    education_weight: float = Field(default=0.8, ge=0, le=3)
+    recreation_weight: float = Field(default=0.8, ge=0, le=3)
+    employment_weight: float = Field(default=0.6, ge=0, le=3)
     # Limit expensive route calls in one request.
     max_route_calls: int = Field(default=120, ge=20, le=600)
 

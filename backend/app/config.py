@@ -28,4 +28,5 @@ LLM_RERANK_MAX_CANDIDATES = int(os.getenv("LLM_RERANK_MAX_CANDIDATES", "12"))
 # Recommender algorithm version switch:
 # - v1: legacy weighted rules (budget/commute/poi/convenience)
 # - v2: upgraded rules with access/e2sfca/calibrated signals
+# - v3: v2 + poi subtype preference maps
 RECOMMENDER_VERSION = os.getenv("RECOMMENDER_VERSION", "v1").strip().lower()

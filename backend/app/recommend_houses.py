@@ -18,8 +18,9 @@ from .house_recommend_schemas import (
 )
 from .llm_rerank import rerank_community_candidates, rerank_house_candidates
 from .models import DistrictMetric, HouseListing, StreetMetric
+from .poi_preference import build_poi_preference_maps
 
-Version = Literal["v1", "v2"]
+Version = Literal["v1", "v2", "v3"]
 
 
 @dataclass
@@ -30,6 +31,7 @@ class HouseCandidate:
     commute_score: float = 0.0
     convenience_score: float = 0.0
     poi_score: float = 0.0
+    poi_subtype_score: float = 0.0
     access_score: float = 0.0
     e2sfca_score: float = 0.0
     calibrated_score: float = 0.0
@@ -53,6 +55,7 @@ class CommunityCandidate:
     median_commute_minutes: float | None
     budget_match_score: float
     poi_score: float
+    poi_subtype_score: float
     traffic_score: float
     access_score: float
     e2sfca_score: float
@@ -80,7 +83,11 @@ def _normalize(values: dict[str, float]) -> dict[str, float]:
 
 
 def _resolve_version() -> Version:
-    return "v2" if RECOMMENDER_VERSION == "v2" else "v1"
+    if RECOMMENDER_VERSION == "v3":
+        return "v3"
+    if RECOMMENDER_VERSION == "v2":
+        return "v2"
+    return "v1"
 
 
 def _build_budget_score(unit_price: float, affordable_unit_price: float) -> float:
@@ -178,6 +185,27 @@ def _community_reason(item: CommunityCandidate) -> str:
 
 
 def _compute_house_rule_score(item: HouseCandidate, version: Version) -> tuple[float, dict[str, float]]:
+    if version == "v3":
+        score = _clamp(
+            0.30 * item.budget_score
+            + 0.23 * item.commute_score
+            + 0.12 * item.poi_score
+            + 0.12 * item.poi_subtype_score
+            + 0.10 * item.access_score
+            + 0.07 * item.e2sfca_score
+            + 0.06 * item.calibrated_score
+        )
+        breakdown = {
+            "budget": round(item.budget_score, 4),
+            "commute": round(item.commute_score, 4),
+            "poi_pref": round(item.poi_score, 4),
+            "poi_subtype_pref": round(item.poi_subtype_score, 4),
+            "access": round(item.access_score, 4),
+            "e2sfca": round(item.e2sfca_score, 4),
+            "calibrated": round(item.calibrated_score, 4),
+        }
+        return score, breakdown
+
     if version == "v2":
         score = _clamp(
             0.34 * item.budget_score
@@ -210,6 +238,27 @@ def _compute_house_rule_score(item: HouseCandidate, version: Version) -> tuple[f
 
 
 def _compute_community_rule_score(item: CommunityCandidate, version: Version) -> tuple[float, dict[str, float]]:
+    if version == "v3":
+        score = _clamp(
+            0.31 * item.budget_match_score
+            + 0.22 * item.traffic_score
+            + 0.12 * item.poi_score
+            + 0.12 * item.poi_subtype_score
+            + 0.10 * item.access_score
+            + 0.07 * item.e2sfca_score
+            + 0.06 * item.calibrated_score
+        )
+        breakdown = {
+            "budget": round(item.budget_match_score, 4),
+            "traffic": round(item.traffic_score, 4),
+            "poi_pref": round(item.poi_score, 4),
+            "poi_subtype_pref": round(item.poi_subtype_score, 4),
+            "access": round(item.access_score, 4),
+            "e2sfca": round(item.e2sfca_score, 4),
+            "calibrated": round(item.calibrated_score, 4),
+        }
+        return score, breakdown
+
     if version == "v2":
         score = _clamp(
             0.34 * item.budget_match_score
@@ -256,6 +305,7 @@ def _build_house_rerank_rows(candidates: list[HouseCandidate], max_items: int) -
             "budget_score": round(item.budget_score, 4),
             "commute_score": round(item.commute_score, 4),
             "poi_score": round(item.poi_score, 4),
+            "poi_subtype_score": round(item.poi_subtype_score, 4),
             "convenience_score": round(item.convenience_score, 4),
             "access_score": round(item.access_score, 4),
             "e2sfca_score": round(item.e2sfca_score, 4),
@@ -329,6 +379,7 @@ def _group_communities(candidates: list[HouseCandidate], version: Version) -> li
         avg_total_price = mean(float(i.model.price) for i in items)
         budget_match_score = mean(i.budget_score for i in items)
         poi_score = mean(i.poi_score for i in items)
+        poi_subtype_score = mean(i.poi_subtype_score for i in items)
         traffic_score = mean(i.commute_score for i in items)
         access_score = mean(i.access_score for i in items)
         e2sfca_score = mean(i.e2sfca_score for i in items)
@@ -346,6 +397,7 @@ def _group_communities(candidates: list[HouseCandidate], version: Version) -> li
             median_commute_minutes=median_commute,
             budget_match_score=budget_match_score,
             poi_score=poi_score,
+            poi_subtype_score=poi_subtype_score,
             traffic_score=traffic_score,
             access_score=access_score,
             e2sfca_score=e2sfca_score,
@@ -376,6 +428,7 @@ def _build_community_rerank_rows(communities: list[CommunityCandidate], max_item
                 "house_count": len(item.items),
                 "budget_match_score": round(item.budget_match_score, 4),
                 "poi_score": round(item.poi_score, 4),
+                "poi_subtype_score": round(item.poi_subtype_score, 4),
                 "traffic_score": round(item.traffic_score, 4),
                 "access_score": round(item.access_score, 4),
                 "e2sfca_score": round(item.e2sfca_score, 4),
@@ -443,6 +496,19 @@ def recommend_houses(payload: HouseRecommendRequest, db: Session) -> HouseRecomm
         healthcare_weight=payload.healthcare_weight,
         shopping_weight=payload.shopping_weight,
     )
+    poi_pref_maps = build_poi_preference_maps(
+        db,
+        shopping_weight=payload.shopping_weight,
+        healthcare_weight=payload.healthcare_weight,
+        daily_life_weight=payload.daily_life_weight,
+        commute_facility_weight=payload.commute_facility_weight,
+        medical_weight=payload.medical_weight,
+        education_weight=payload.education_weight,
+        recreation_weight=payload.recreation_weight,
+        employment_weight=payload.employment_weight,
+    )
+    district_poi_subtype_map = poi_pref_maps.district_scores
+    street_poi_subtype_map = poi_pref_maps.street_scores
     access_map, e2sfca_map, calibrated_map, livable_v2_map, street_calibrated_map = _build_advanced_metric_maps(db)
 
     house_rows = db.scalars(select(HouseListing).where(HouseListing.unit_price <= affordable_unit_price * 1.35)).all()
@@ -475,6 +541,10 @@ def recommend_houses(payload: HouseRecommendRequest, db: Session) -> HouseRecomm
         item.commute_score = _build_commute_score(item.commute_minutes, payload.max_commute_minutes)
         item.convenience_score = livable_v2_map.get(district, convenience_map.get(district, 0.5))
         item.poi_score = poi_pref_map.get(district, 0.5)
+        item.poi_subtype_score = street_poi_subtype_map.get(
+            (district, sub_district),
+            district_poi_subtype_map.get(district, 0.5),
+        )
         item.access_score = access_map.get(district, 0.5)
         item.e2sfca_score = e2sfca_map.get(district, 0.5)
         base_calibrated = calibrated_map.get(district, 0.5)
@@ -632,6 +702,10 @@ def recommend_houses(payload: HouseRecommendRequest, db: Session) -> HouseRecomm
         "amap_geocode_ok": bool(work_location is not None),
         "amap_route_success_count": route_success_count,
         "amap_route_failure_count": max(0, route_calls - route_success_count),
+        "poi_pref_ready": poi_pref_maps.diagnostics.get("poi_pref_ready", False),
+        "poi_pref_grouped_rows": int(poi_pref_maps.diagnostics.get("poi_pref_grouped_rows", 0)),
+        "poi_pref_street_keys": int(poi_pref_maps.diagnostics.get("poi_pref_street_keys", 0)),
+        "poi_pref_district_keys": int(poi_pref_maps.diagnostics.get("poi_pref_district_keys", 0)),
     }
     if work_location_str is None:
         summary["geocode_warning"] = "work_address_geocode_failed_or_unavailable"
