@@ -33,11 +33,24 @@ type MetricKey =
   | "recreation_count"
   | "company_count"
   | "business_activity"
-  | "livability_score";
+  | "livability_score"
+  | "livability_score_v2"
+  | "e2sfca_access_score"
+  | "calibrated_score";
 
 const axisText = { color: "#7b6758", fontSize: 11 };
 const grid = { top: 20, left: 46, right: 18, bottom: 46 };
-const selectedColor = "#2f241c";
+const palette = {
+  primary: "#ff8a5c",
+  warm: "#f59e0b",
+  accent: "#31b78f",
+  blue: "#3b82f6",
+  purple: "#8b5cf6",
+  pink: "#ef6f8f",
+  teal: "#16a3b8",
+  dark: "#2f241c"
+};
+const selectedColor = palette.dark;
 
 const relationMetrics: { key: MetricKey; label: string }[] = [
   { key: "avg_price", label: "房价" },
@@ -47,15 +60,15 @@ const relationMetrics: { key: MetricKey; label: string }[] = [
   { key: "healthcare_count", label: "医疗" },
   { key: "recreation_count", label: "休闲" },
   { key: "business_activity", label: "活跃度" },
-  { key: "livability_score", label: "评分" }
+  { key: "calibrated_score", label: "校准评分" }
 ];
 
 const poiStackFields: { key: MetricKey; label: string; color: string }[] = [
-  { key: "shopping_count", label: "购物", color: "#ff8a5c" },
-  { key: "traffic_count", label: "交通", color: "#3b82f6" },
-  { key: "healthcare_count", label: "医疗", color: "#10b981" },
-  { key: "recreation_count", label: "休闲", color: "#f59e0b" },
-  { key: "company_count", label: "企业", color: "#8b5cf6" }
+  { key: "shopping_count", label: "购物", color: palette.primary },
+  { key: "traffic_count", label: "交通", color: palette.blue },
+  { key: "healthcare_count", label: "医疗", color: palette.accent },
+  { key: "recreation_count", label: "休闲", color: palette.warm },
+  { key: "company_count", label: "企业", color: palette.purple }
 ];
 
 const radarFields: { key: MetricKey; label: string; inverse?: boolean }[] = [
@@ -66,7 +79,8 @@ const radarFields: { key: MetricKey; label: string; inverse?: boolean }[] = [
   { key: "healthcare_count", label: "医疗" },
   { key: "recreation_count", label: "休闲" },
   { key: "business_activity", label: "活跃度" },
-  { key: "livability_score", label: "综合评分" }
+  { key: "e2sfca_access_score", label: "供需可达" },
+  { key: "calibrated_score", label: "校准评分" }
 ];
 
 const ChartsPanel = memo(function ChartsPanel({
@@ -104,7 +118,7 @@ const ChartsPanel = memo(function ChartsPanel({
           data: priceTop10.map((d) => ({
             name: d.district,
             value: Math.round(d.avg_price),
-            itemStyle: { color: d.district === selectedDistrict ? selectedColor : "#ff8a5c" }
+            itemStyle: { color: d.district === selectedDistrict ? selectedColor : palette.primary }
           })),
           barMaxWidth: 22
         }
@@ -117,7 +131,7 @@ const ChartsPanel = memo(function ChartsPanel({
     () => ({
       tooltip: { trigger: "item" },
       legend: { bottom: 0, textStyle: axisText },
-      color: ["#ff8a5c", "#f7c948", "#31b78f", "#3b82f6", "#8b5cf6", "#ef6f8f"],
+      color: [palette.primary, "#f7c948", palette.accent, palette.blue, palette.purple, palette.pink],
       series: [
         {
           type: "pie",
@@ -143,7 +157,7 @@ const ChartsPanel = memo(function ChartsPanel({
           data: shoppingTop5.map((d) => ({
             name: d.district,
             value: d.shopping_count,
-            itemStyle: { color: d.district === selectedDistrict ? selectedColor : "#31b78f" }
+            itemStyle: { color: d.district === selectedDistrict ? selectedColor : palette.accent }
           })),
           barMaxWidth: 26
         }
@@ -168,8 +182,8 @@ const ChartsPanel = memo(function ChartsPanel({
           type: "bar",
           data: scoreRanking.map((d) => ({
             name: d.district,
-            value: Number(d.livability_score.toFixed(3)),
-            itemStyle: { color: d.district === selectedDistrict ? selectedColor : d.livability_score >= 0 ? "#31b78f" : "#ef6f61" }
+            value: Number(d.calibrated_score.toFixed(3)),
+            itemStyle: { color: d.district === selectedDistrict ? selectedColor : scoreColor(d.calibrated_score) }
           })),
           barMaxWidth: 18
         }
@@ -198,7 +212,7 @@ const ChartsPanel = memo(function ChartsPanel({
           data: scatter.map((d) => ({
             name: d.district,
             value: [d.avg_price, d.business_activity, d.poi_total],
-            itemStyle: { color: d.district === selectedDistrict ? selectedColor : scoreColor(d.livability_score) }
+            itemStyle: { color: d.district === selectedDistrict ? selectedColor : scoreColor(d.calibrated_score) }
           })),
           markLine: {
             silent: true,
@@ -259,18 +273,69 @@ const ChartsPanel = memo(function ChartsPanel({
           type: "heatmap",
           data,
           label: { show: true, color: "#4b3b31", fontSize: 10 },
-          emphasis: { itemStyle: { borderColor: "#2f241c", borderWidth: 1 } }
+          emphasis: { itemStyle: { borderColor: palette.dark, borderWidth: 1 }, label: { show: true } }
         }
       ]
     };
   }, [scatter]);
 
+  // 箱线图用于展示房价分布（min, Q1, median, Q3, max）
+  const boxplotOption = useMemo<EChartsOption>(() => {
+    const prices = scatter.map((d) => Number(d.avg_price)).filter((v) => Number.isFinite(v)).sort((a, b) => a - b);
+    if (!prices.length) return { grid };
+    const q = (arr: number[], p: number) => {
+      const idx = (arr.length - 1) * p;
+      const lo = Math.floor(idx);
+      const hi = Math.ceil(idx);
+      return lo === hi ? arr[lo] : arr[lo] * (hi - idx) + arr[hi] * (idx - lo);
+    };
+    const min = prices[0];
+    const max = prices[prices.length - 1];
+    const q1 = q(prices, 0.25);
+    const median = q(prices, 0.5);
+    const q3 = q(prices, 0.75);
+    const boxData = [[min, q1, median, q3, max]];
+    return {
+      grid,
+      tooltip: { formatter: (params: any) => `房价箱线图<br/>最小 ${Math.round(min)} 元/㎡<br/>Q1 ${Math.round(q1)} 元/㎡<br/>中位数 ${Math.round(median)} 元/㎡<br/>Q3 ${Math.round(q3)} 元/㎡<br/>最大 ${Math.round(max)} 元/㎡` },
+      xAxis: { type: "category", data: ["房价分布"], axisLabel: axisText },
+      yAxis: { type: "value", axisLabel: axisText },
+      series: [
+        { name: "boxplot", type: "boxplot", data: boxData, itemStyle: { color: palette.primary }, tooltip: { formatter: undefined } }
+      ]
+    };
+  }, [scatter]);
+
+  const groupedPoiOption = useMemo<EChartsOption>(() => {
+    const rows = [...scoreRanking].slice(0, 6);
+    const seriesFields = [
+      { key: "shopping_count" as const, label: "购物", color: palette.primary },
+      { key: "traffic_count" as const, label: "交通", color: palette.blue },
+      { key: "healthcare_count" as const, label: "医疗", color: palette.accent }
+    ];
+    return {
+      grid: { top: 38, left: 46, right: 18, bottom: 50 },
+      tooltip: { trigger: "axis", axisPointer: { type: "shadow" } },
+      legend: { top: 0, textStyle: axisText },
+      xAxis: { type: "category", data: rows.map((d) => d.district), axisLabel: { ...axisText, rotate: 28 } },
+      yAxis: { type: "value", axisLabel: axisText },
+      series: seriesFields.map((field) => ({
+        name: field.label,
+        type: "bar",
+        barMaxWidth: 16,
+        emphasis: { focus: "series" },
+        itemStyle: { color: field.color },
+        data: rows.map((d) => ({ name: d.district, value: Number(d[field.key]) }))
+      }))
+    };
+  }, [scoreRanking]);
+
   const scoreHistogramOption = useMemo<EChartsOption>(() => {
     const bins = [
-      { name: "低分", min: -Infinity, max: -0.2, color: "#ef6f61" },
-      { name: "中低", min: -0.2, max: 0, color: "#f59e0b" },
-      { name: "中高", min: 0, max: 0.2, color: "#31b78f" },
-      { name: "高分", min: 0.2, max: Infinity, color: "#16a3b8" }
+      { name: "低分", min: -Infinity, max: 0.15, color: "#ef6f61" },
+      { name: "中低", min: 0.15, max: 0.3, color: palette.warm },
+      { name: "中高", min: 0.3, max: 0.45, color: palette.accent },
+      { name: "高分", min: 0.45, max: Infinity, color: palette.teal }
     ];
     return {
       grid,
@@ -282,7 +347,7 @@ const ChartsPanel = memo(function ChartsPanel({
           type: "bar",
           barMaxWidth: 34,
           data: bins.map((bin) => ({
-            value: scatter.filter((d) => d.livability_score >= bin.min && d.livability_score < bin.max).length,
+            value: scatter.filter((d) => d.calibrated_score >= bin.min && d.calibrated_score < bin.max).length,
             itemStyle: { color: bin.color }
           }))
         }
@@ -301,8 +366,8 @@ const ChartsPanel = memo(function ChartsPanel({
       });
 
     return {
-      color: ["#ff8a5c", "#31b78f"],
-      tooltip: {},
+      color: [palette.primary, palette.accent],
+      tooltip: { trigger: "item" },
       legend: { bottom: 0, data: [selected?.district ?? "当前区域", "全市均值"], textStyle: axisText },
       radar: {
         radius: "62%",
@@ -319,7 +384,8 @@ const ChartsPanel = memo(function ChartsPanel({
             { name: selected?.district ?? "当前区域", value: toRadar(selected) },
             { name: "全市均值", value: toRadar(city) }
           ],
-          areaStyle: { opacity: 0.18 }
+          areaStyle: { opacity: 0.18 },
+          emphasis: { focus: "series", lineStyle: { width: 3 }, itemStyle: { borderColor: palette.dark, borderWidth: 1 } }
         }
       ]
     };
@@ -330,7 +396,7 @@ const ChartsPanel = memo(function ChartsPanel({
       { key: "avg_price", label: "房价" },
       { key: "poi_total", label: "POI" },
       { key: "business_activity", label: "活跃度" },
-      { key: "livability_score", label: "评分" }
+      { key: "calibrated_score", label: "校准评分" }
     ];
     const ranges = buildRanges(scatter, fields.map((field) => field.key));
     return {
@@ -346,18 +412,19 @@ const ChartsPanel = memo(function ChartsPanel({
       tooltip: {
         formatter: (params: any) => {
           const row = scatter[params.dataIndex];
-          return row ? `${row.district}<br/>房价 ${Math.round(row.avg_price).toLocaleString("zh-CN")} 元/㎡<br/>POI ${row.poi_total.toLocaleString("zh-CN")}<br/>活跃度 ${row.business_activity.toFixed(1)}<br/>评分 ${row.livability_score.toFixed(3)}` : "";
+          return row ? `${row.district}<br/>房价 ${Math.round(row.avg_price).toLocaleString("zh-CN")} 元/㎡<br/>POI ${row.poi_total.toLocaleString("zh-CN")}<br/>活跃度 ${row.business_activity.toFixed(1)}<br/>校准评分 ${row.calibrated_score.toFixed(3)}` : "";
         }
       },
       series: [
         {
           type: "parallel",
           lineStyle: { width: 2, opacity: 0.46 },
+          emphasis: { focus: "series", lineStyle: { width: 3, opacity: 0.95 } },
           data: scatter.map((d) => ({
             name: d.district,
             value: fields.map((field) => Number(d[field.key])),
             lineStyle: {
-              color: d.district === selectedDistrict ? selectedColor : scoreColor(d.livability_score),
+              color: d.district === selectedDistrict ? selectedColor : scoreColor(d.calibrated_score),
               opacity: d.district === selectedDistrict ? 0.95 : 0.42,
               width: d.district === selectedDistrict ? 4 : 2
             }
@@ -392,16 +459,19 @@ const ChartsPanel = memo(function ChartsPanel({
         <div className="mt-5">
           {activeModule === "overview" ? (
             <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
-              <ChartCard title="房价 Top10 区域">
+              <ChartCard title="房价 Top10 区域" desc="展示各区挂牌均价前 10，点击柱状或区名联动地图。">
                 <EChart option={priceOption} className="h-72 w-full" onClick={handleChartClick} />
               </ChartCard>
-              <ChartCard title="宜居性评分排名">
+              <ChartCard title="房价分布（箱线图）" desc="展示全市房价分布的箱线，便于查看离散与异常值。">
+                <EChart option={boxplotOption} className="h-72 w-full" />
+              </ChartCard>
+              <ChartCard title="校准评分排名" desc="按综合校准评分排序，支持点击选中区域联动。">
                 <EChart option={scoreOption} className="h-72 w-full" onClick={handleChartClick} />
               </ChartCard>
-              <ChartCard title="评分区间分布">
+              <ChartCard title="校准评分区间分布" desc="展示区域评分分布，帮助识别高/低分簇群。">
                 <EChart option={scoreHistogramOption} className="h-64 w-full" />
               </ChartCard>
-              <ChartCard title="房价与便利性象限">
+              <ChartCard title="房价与便利性象限" desc="按房价与商圈活跃度分象限，象限线为均值。">
                 <EChart option={quadrantOption} className="h-64 w-full" onClick={handleChartClick} />
               </ChartCard>
             </div>
@@ -409,33 +479,36 @@ const ChartsPanel = memo(function ChartsPanel({
 
           {activeModule === "poi" ? (
             <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
-              <ChartCard title="POI类别占比">
+              <ChartCard title="POI类别占比" desc="各类 POI 占比，反映区内配套结构。">
                 <EChart option={poiOption} className="h-72 w-full" />
               </ChartCard>
-              <ChartCard title="高评分区域 POI 结构">
+              <ChartCard title="热门区域 POI 分组柱状图" desc="对比高评分区域中购物、交通、医疗三类 POI。">
+                <EChart option={groupedPoiOption} className="h-72 w-full" onClick={handleChartClick} />
+              </ChartCard>
+              <ChartCard title="校准评分较高区域 POI 结构" desc="展示高评分区域中不同 POI 类型的构成。">
                 <EChart option={poiStackOption} className="h-72 w-full" onClick={handleChartClick} />
               </ChartCard>
-              <ChartCard title="购物数量 Top5 区域">
+              <ChartCard title="购物数量 Top5 区域" desc="展示购物类 POI 数量排名前 5 的区域。">
                 <EChart option={shoppingOption} className="h-64 w-full" onClick={handleChartClick} />
               </ChartCard>
-              <ChartCard title="选中区域 vs 全市均值">
-                <EChart option={radarOption} className="h-64 w-full" />
+              <ChartCard title="选中区域 vs 全市均值" desc="雷达对比选中区域与全市均值各项标准化指标。">
+                <EChart option={radarOption} className="h-64 w-full" onClick={handleChartClick} />
               </ChartCard>
             </div>
           ) : null}
 
           {activeModule === "relation" ? (
             <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
-              <ChartCard title="房价与便利性象限">
+              <ChartCard title="房价与便利性象限" desc="按房价与商圈活跃度分象限，支持点击点位联动地图。">
                 <EChart option={quadrantOption} className="h-80 w-full" onClick={handleChartClick} />
               </ChartCard>
-              <ChartCard title="指标相关性热力图">
+              <ChartCard title="指标相关性热力图" desc="展示指标间 Pearson 相关系数，颜色越暖相关越强。">
                 <EChart option={correlationOption} className="h-80 w-full" />
               </ChartCard>
-              <ChartCard title="多指标平行坐标">
+              <ChartCard title="多指标平行坐标" desc="展示多维指标分布，点击线条可联动选中区域。">
                 <EChart option={parallelOption} className="h-72 w-full" onClick={handleChartClick} />
               </ChartCard>
-              <ChartCard title="房价 Top10 区域">
+              <ChartCard title="房价 Top10 区域" desc="展示各区挂牌均价前 10，点击柱状或区名联动地图。">
                 <EChart option={priceOption} className="h-72 w-full" onClick={handleChartClick} />
               </ChartCard>
             </div>
@@ -443,16 +516,16 @@ const ChartsPanel = memo(function ChartsPanel({
 
           {activeModule === "model" ? (
             <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
-              <ChartCard title="选中区域 vs 全市均值">
+              <ChartCard title="选中区域 vs 全市均值" desc="雷达对比选中区域与全市均值各项标准化指标。">
                 <EChart option={radarOption} className="h-80 w-full" />
               </ChartCard>
-              <ChartCard title="评分区间分布">
+              <ChartCard title="校准评分区间分布" desc="展示区域评分分布，帮助识别高/低分簇群。">
                 <EChart option={scoreHistogramOption} className="h-80 w-full" />
               </ChartCard>
-              <ChartCard title="宜居性评分排名">
+              <ChartCard title="校准评分排名" desc="按综合校准评分排序，支持点击选中区域联动。">
                 <EChart option={scoreOption} className="h-[28rem] w-full" onClick={handleChartClick} />
               </ChartCard>
-              <ChartCard title="指标相关性热力图">
+              <ChartCard title="指标相关性热力图" desc="展示指标间 Pearson 相关系数，颜色越暖相关越强。">
                 <EChart option={correlationOption} className="h-[28rem] w-full" />
               </ChartCard>
             </div>
@@ -463,20 +536,22 @@ const ChartsPanel = memo(function ChartsPanel({
   );
 });
 
-function ChartCard({ title, children }: { title: string; children: ReactNode }) {
+function ChartCard({ title, children, desc }: { title: string; children: ReactNode; desc?: string }) {
   return (
     <Card className="shrink-0 rounded-[18px] border-[#f1dfc9] bg-[#fffdf8]/92 shadow-[0_12px_34px_rgba(104,72,42,0.08)]">
       <CardHeader className="pb-2">
         <CardTitle className="text-base font-black text-[#3c2a20]">{title}</CardTitle>
+        {desc ? <p className="mt-1 text-sm text-[#6b5345]">{desc}</p> : null}
       </CardHeader>
       <CardContent>{children}</CardContent>
     </Card>
   );
 }
 
-function average(items: DistrictMetric[], key: MetricKey) {
-  if (!items.length) return 0;
-  return items.reduce((sum, item) => sum + Number(item[key]), 0) / items.length;
+function average(items: DistrictMetric[], key: keyof DistrictMetric) {
+  const values = items.map((item) => Number(item[key])).filter((value) => Number.isFinite(value));
+  if (!values.length) return 0;
+  return values.reduce((sum, value) => sum + value, 0) / values.length;
 }
 
 function pearson(items: DistrictMetric[], xKey: MetricKey, yKey: MetricKey) {
@@ -534,6 +609,35 @@ function buildAverageMetric(items: DistrictMetric[]): DistrictMetric {
     activity_norm: base?.activity_norm ?? 0,
     price_norm: base?.price_norm ?? 0,
     livability_score: average(items, "livability_score"),
+    poi_diversity: average(items, "poi_diversity"),
+    shopping_per_house: average(items, "shopping_per_house"),
+    traffic_per_house: average(items, "traffic_per_house"),
+    healthcare_per_house: average(items, "healthcare_per_house"),
+    recreation_per_house: average(items, "recreation_per_house"),
+    company_per_house: average(items, "company_per_house"),
+    cost_pressure: average(items, "cost_pressure"),
+    affordability_score: average(items, "affordability_score"),
+    service_score: average(items, "service_score"),
+    vitality_score: average(items, "vitality_score"),
+    livability_score_v2: average(items, "livability_score_v2"),
+    shopping_access: average(items, "shopping_access"),
+    traffic_access: average(items, "traffic_access"),
+    healthcare_access: average(items, "healthcare_access"),
+    recreation_access: average(items, "recreation_access"),
+    company_access: average(items, "company_access"),
+    nearest_traffic_distance: average(items, "nearest_traffic_distance"),
+    nearest_healthcare_distance: average(items, "nearest_healthcare_distance"),
+    access_score: average(items, "access_score"),
+    value_score: average(items, "value_score"),
+    shopping_e2sfca_access: average(items, "shopping_e2sfca_access"),
+    traffic_e2sfca_access: average(items, "traffic_e2sfca_access"),
+    healthcare_e2sfca_access: average(items, "healthcare_e2sfca_access"),
+    recreation_e2sfca_access: average(items, "recreation_e2sfca_access"),
+    company_e2sfca_access: average(items, "company_e2sfca_access"),
+    e2sfca_access_score: average(items, "e2sfca_access_score"),
+    e2sfca_value_score: average(items, "e2sfca_value_score"),
+    sample_reliability_score: average(items, "sample_reliability_score"),
+    calibrated_score: average(items, "calibrated_score"),
     center_lng: null,
     center_lat: null
   };
