@@ -40,7 +40,6 @@ ACTIVITY_WEIGHTS = {
 }
 
 STREET_BOUNDARY_PATH = DATA_DIR / "sh_street_boundary" / "shanghai_street_boundary.shp"
-STREET_BOUNDARY_FALLBACK_PATH = DATA_DIR / "data" / "sh_street_boundary" / "shanghai_street_boundary.shp"
 
 
 def minmax(series: pd.Series) -> pd.Series:
@@ -363,8 +362,6 @@ def ingest(data_dir: Path = DATA_DIR, house_path: Path | None = None) -> None:
     _ensure_house_listing_columns()
 
     street_shapes = load_street_shapes(data_dir / "sh_street_boundary" / "shanghai_street_boundary.shp")
-    if not street_shapes:
-        street_shapes = load_street_shapes(data_dir / "data" / "sh_street_boundary" / "shanghai_street_boundary.shp")
     resolved_house_path = house_path or data_dir / "sh_house_dataset_raw.parquet"
     houses = load_house_rows(resolved_house_path)
     pois = pd.DataFrame(iter_poi_rows(data_dir / "sh_poi_raw"))
