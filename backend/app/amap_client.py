@@ -12,7 +12,7 @@ from .config import AMAP_WEB_SERVICE_KEY
 GeocodeLocation = tuple[float, float]
 CommuteMode = Literal["transit", "driving"]
 
-GEOCODE_URL = "https://restapi.amap.com/v3/geocode/geo?"
+GEOCODE_URL = "https://restapi.amap.com/v3/geocode/geo"
 DRIVING_URL = "https://restapi.amap.com/v5/direction/driving"
 TRANSIT_URL = "https://restapi.amap.com/v5/direction/transit/integrated"
 
@@ -62,29 +62,49 @@ def _parse_location(value: str) -> GeocodeLocation | None:
     return lng, lat
 
 
+def _extract_duration_seconds(route_item: dict[str, Any]) -> float | None:
+    # v5 often returns duration under item.cost.duration
+    cost = route_item.get("cost")
+    if isinstance(cost, dict):
+        duration = cost.get("duration")
+        try:
+            if duration is not None:
+                return float(duration)
+        except (TypeError, ValueError):
+            pass
+
+    # backward-compatible fallback for payloads exposing top-level duration
+    duration = route_item.get("duration")
+    try:
+        if duration is not None:
+            return float(duration)
+    except (TypeError, ValueError):
+        return None
+    return None
+
+
 def geocode_address(address: str, city: str = "上海") -> GeocodeLocation | None:
     cache_key = f"{city}|{address}".strip()
-    if cache_key in _GEOCODE_CACHE:
-        return _GEOCODE_CACHE[cache_key]
+    cached = _GEOCODE_CACHE.get(cache_key)
+    if cached is not None:
+        return cached
 
     result = _request_json(
         GEOCODE_URL,
         {
             "address": address,
             "city": city,
-            "output": "JSON",
         },
     )
     if not result.ok or not result.data:
-        _GEOCODE_CACHE[cache_key] = None
         return None
 
     geocodes = result.data.get("geocodes") or []
     if not geocodes:
-        _GEOCODE_CACHE[cache_key] = None
         return None
     location = _parse_location(str(geocodes[0].get("location", "")))
-    _GEOCODE_CACHE[cache_key] = location
+    if location is not None:
+        _GEOCODE_CACHE[cache_key] = location
     return location
 
 
@@ -123,6 +143,7 @@ def get_commute_minutes(origin: GeocodeLocation, destination: GeocodeLocation, m
             {
                 "origin": origin_str,
                 "destination": destination_str,
+                "show_fields": "cost",
             },
         )
         if not result.ok or not result.data:
@@ -132,9 +153,8 @@ def get_commute_minutes(origin: GeocodeLocation, destination: GeocodeLocation, m
         paths = route.get("paths") or []
         if not paths:
             return None
-        try:
-            duration_seconds = float(paths[0].get("duration"))
-        except (TypeError, ValueError):
+        duration_seconds = _extract_duration_seconds(paths[0])
+        if duration_seconds is None:
             return None
         value = duration_seconds / 60.0
         _ROUTE_CACHE[cache_key] = value
@@ -147,6 +167,7 @@ def get_commute_minutes(origin: GeocodeLocation, destination: GeocodeLocation, m
             "destination": destination_str,
             "city1": "021",
             "city2": "021",
+            "show_fields": "cost",
         },
     )
     if not result.ok or not result.data:
@@ -156,9 +177,8 @@ def get_commute_minutes(origin: GeocodeLocation, destination: GeocodeLocation, m
     transits = route.get("transits") or []
     if not transits:
         return None
-    try:
-        duration_seconds = float(transits[0].get("duration"))
-    except (TypeError, ValueError):
+    duration_seconds = _extract_duration_seconds(transits[0])
+    if duration_seconds is None:
         return None
     value = duration_seconds / 60.0
     _ROUTE_CACHE[cache_key] = value
