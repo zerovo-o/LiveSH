@@ -598,6 +598,12 @@ def attach_phase4_scores(
     reliability_house_threshold: int,
 ) -> pd.DataFrame:
     df = metrics.copy()
+    if "house_count" not in df.columns:
+        df["house_count"] = 0.0
+    if "livability_score_v2" not in df.columns:
+        df["livability_score_v2"] = 0.0
+    if "value_score" not in df.columns:
+        df["value_score"] = 0.0
     aggregated = aggregate_e2sfca_features(house_features, group_cols)
     if not aggregated.empty:
         df = df.merge(aggregated, on=list(group_cols), how="left")

@@ -1,11 +1,11 @@
 import { Building2, ChevronRight, Loader2, MapPinned, Search, SlidersHorizontal } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { formatPrice, formatScore } from "../lib/utils";
+import type { DistrictMetric, StreetMetric } from "../types/metrics";
 import { Badge } from "./ui/badge";
 import { Button } from "./ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from "./ui/select";
-import { formatPrice, formatScore } from "../lib/utils";
-import type { DistrictMetric, StreetMetric } from "../types/metrics";
 
 type StreetPanelProps = {
   districts: DistrictMetric[];
@@ -13,7 +13,7 @@ type StreetPanelProps = {
   onSelectDistrict: (district: string | null) => void;
 };
 
-const ALL_VALUE = "全部区域";
+const ALL_VALUE = "__all__";
 
 export default function StreetPanel({ districts, selectedDistrict, onSelectDistrict }: StreetPanelProps) {
   const [streets, setStreets] = useState<StreetMetric[]>([]);
@@ -31,7 +31,7 @@ export default function StreetPanel({ districts, selectedDistrict, onSelectDistr
       const data = (await res.json()) as StreetMetric[];
       setStreets(data);
     } catch {
-      setError("街道/镇数据暂不可用，请先重新运行后端入库脚本。");
+      setError("街道数据加载失败，请检查后端是否正常启动。");
     } finally {
       setLoading(false);
     }
@@ -67,12 +67,12 @@ export default function StreetPanel({ districts, selectedDistrict, onSelectDistr
               <MapPinned className="h-5 w-5" />
             </div>
             <div>
-              <h2 className="text-2xl font-black text-[#33251f]">街道/镇精细分析</h2>
+              <h2 className="text-2xl font-black text-[#33251f]">街道/镇级分析</h2>
             </div>
           </div>
         </div>
         <Badge variant="outline" className="border-[#bfe6d6] bg-[#eefbf4] text-[#21745d]">
-          {loading ? "加载中" : `${filtered.length} 个街道/镇`}
+          {loading ? "加载中" : `${filtered.length} 条街道`}
         </Badge>
       </div>
 
@@ -89,7 +89,7 @@ export default function StreetPanel({ districts, selectedDistrict, onSelectDistr
           </SelectTrigger>
           <SelectContent className="w-44 min-w-44">
             <SelectGroup>
-              <SelectItem value={ALL_VALUE}>全部区域</SelectItem>
+              <SelectItem value={ALL_VALUE}>全部行政区</SelectItem>
               {districts.map((item) => (
                 <SelectItem key={item.district} value={item.district}>
                   {item.district}
@@ -108,7 +108,7 @@ export default function StreetPanel({ districts, selectedDistrict, onSelectDistr
               setQuery(event.target.value);
             }}
             className="min-w-0 flex-1 bg-transparent text-[#33251f] outline-none placeholder:text-[#a58b76]"
-            placeholder="搜索街道/镇或行政区"
+            placeholder="搜索街道/行政区"
           />
         </label>
 
@@ -130,7 +130,7 @@ export default function StreetPanel({ districts, selectedDistrict, onSelectDistr
       {loading ? (
         <div className="mt-5 flex h-48 items-center justify-center rounded-xl border border-[#f1dfc9] bg-[#fffdf8]/80 text-sm text-[#806653]">
           <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-          正在加载街道/镇指标
+          正在加载街道指标...
         </div>
       ) : error ? (
         <div className="mt-5 rounded-xl border border-[#f2c798] bg-[#fff7e7] p-4 text-sm text-[#9a5a1d]">{error}</div>
@@ -156,7 +156,7 @@ export default function StreetPanel({ districts, selectedDistrict, onSelectDistr
                 </span>
                 <span className="min-w-0 flex-1">
                   <span className="block truncate text-sm font-black text-[#33251f]">
-                    {item.district} · {item.street}
+                    {item.district} / {item.street}
                   </span>
                   <span className="mt-1 block text-xs text-[#806653]">
                     {formatPrice(item.avg_price)} / POI {item.poi_total.toLocaleString("zh-CN")}
@@ -175,22 +175,22 @@ export default function StreetPanel({ districts, selectedDistrict, onSelectDistr
                   <ChevronRight className="h-4 w-4 text-[#a58b76]" />
                   {selectedStreet.street}
                 </CardTitle>
-                <Badge className="bg-[#ff7a4f] text-white">评分 {formatScore(selectedStreet.livability_score)}</Badge>
+                <Badge className="bg-[#ff7a4f] text-white">宜居分 {formatScore(selectedStreet.livability_score)}</Badge>
               </CardHeader>
               <CardContent>
                 <div className="grid grid-cols-2 gap-3 text-sm md:grid-cols-3 xl:grid-cols-4">
-                  <StreetMetricCard label="平均房价" value={formatPrice(selectedStreet.avg_price)} />
-                  <StreetMetricCard label="平均总价" value={`${selectedStreet.avg_total_price.toFixed(1)} 万`} />
-                  <StreetMetricCard label="房源数量" value={selectedStreet.house_count.toLocaleString("zh-CN")} />
-                  <StreetMetricCard label="POI总数" value={selectedStreet.poi_total.toLocaleString("zh-CN")} />
-                  <StreetMetricCard label="购物" value={selectedStreet.shopping_count.toLocaleString("zh-CN")} />
-                  <StreetMetricCard label="交通" value={selectedStreet.traffic_count.toLocaleString("zh-CN")} />
-                  <StreetMetricCard label="医疗" value={selectedStreet.healthcare_count.toLocaleString("zh-CN")} />
-                  <StreetMetricCard label="休闲" value={selectedStreet.recreation_count.toLocaleString("zh-CN")} />
-                  <StreetMetricCard label="企业" value={selectedStreet.company_count.toLocaleString("zh-CN")} />
-                  <StreetMetricCard label="住宅" value={selectedStreet.residence_count.toLocaleString("zh-CN")} />
-                  <StreetMetricCard label="活跃度" value={selectedStreet.business_activity.toFixed(1)} />
-                  <StreetMetricCard label="房价标准化" value={formatScore(selectedStreet.price_norm)} />
+                  <StreetMetricCard label="均价" value={formatPrice(selectedStreet.avg_price)} />
+                  <StreetMetricCard label="均总价" value={`${selectedStreet.avg_total_price.toFixed(1)} 万`} />
+                  <StreetMetricCard label="房源数" value={selectedStreet.house_count.toLocaleString("zh-CN")} />
+                  <StreetMetricCard label="POI 总量" value={selectedStreet.poi_total.toLocaleString("zh-CN")} />
+                  <StreetMetricCard label="商业 POI" value={selectedStreet.shopping_count.toLocaleString("zh-CN")} />
+                  <StreetMetricCard label="交通 POI" value={selectedStreet.traffic_count.toLocaleString("zh-CN")} />
+                  <StreetMetricCard label="医疗 POI" value={selectedStreet.healthcare_count.toLocaleString("zh-CN")} />
+                  <StreetMetricCard label="休闲 POI" value={selectedStreet.recreation_count.toLocaleString("zh-CN")} />
+                  <StreetMetricCard label="企业 POI" value={selectedStreet.company_count.toLocaleString("zh-CN")} />
+                  <StreetMetricCard label="住宅 POI" value={selectedStreet.residence_count.toLocaleString("zh-CN")} />
+                  <StreetMetricCard label="商圈活跃度" value={selectedStreet.business_activity.toFixed(1)} />
+                  <StreetMetricCard label="价格标准化" value={formatScore(selectedStreet.price_norm)} />
                 </div>
               </CardContent>
             </Card>
@@ -198,7 +198,7 @@ export default function StreetPanel({ districts, selectedDistrict, onSelectDistr
         </div>
       ) : (
         <div className="mt-5 rounded-xl border border-[#f1dfc9] bg-[#fffdf8]/80 p-5 text-sm text-[#806653]">
-          没有匹配到街道/镇数据。
+          没有可展示的街道数据，请先检查数据入库是否完成。
         </div>
       )}
     </section>

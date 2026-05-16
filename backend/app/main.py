@@ -6,14 +6,12 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from .ai_advice import generate_ai_advice
-from .agent_schemas import AgentRecommendRequest, AgentRecommendResponse
-from .amap import fetch_shanghai_district_boundaries
+from .amap import fetch_local_shanghai_street_boundaries, fetch_shanghai_district_boundaries
 from .database import Base, engine, get_db
 from .house_recommend_schemas import HouseRecommendRequest, HouseRecommendResponse
-from .models import DistrictMetric, PoiCategoryMetric
-from .recommend_agent import recommend_districts
+from .models import DistrictMetric, PoiCategoryMetric, StreetMetric
 from .recommend_houses import recommend_houses
-from .schemas import AIAdviceOut, AIAdviceRequest, DistrictMetricOut, PoiCategoryOut, SummaryOut
+from .schemas import AIAdviceOut, AIAdviceRequest, DistrictMetricOut, StreetMetricOut, SummaryOut
 
 Base.metadata.create_all(bind=engine)
 
@@ -45,6 +43,24 @@ def get_district(district: str, db: Session = Depends(get_db)):
     return item
 
 
+@app.get("/api/streets", response_model=list[StreetMetricOut])
+def list_streets(district: str | None = None, db: Session = Depends(get_db)):
+    statement = select(StreetMetric)
+    if district:
+        statement = statement.where(StreetMetric.district == district)
+    return db.scalars(statement.order_by(StreetMetric.livability_score.desc())).all()
+
+
+@app.get("/api/streets/{district}/{street}", response_model=StreetMetricOut)
+def get_street(district: str, street: str, db: Session = Depends(get_db)):
+    item = db.scalars(
+        select(StreetMetric).where(StreetMetric.district == district, StreetMetric.street == street)
+    ).first()
+    if not item:
+        raise HTTPException(status_code=404, detail="street not found")
+    return item
+
+
 @app.get("/api/summary", response_model=SummaryOut)
 def summary(db: Session = Depends(get_db)):
     districts = db.scalars(select(DistrictMetric)).all()
@@ -68,6 +84,11 @@ def shanghai_district_boundaries() -> dict:
     return {"districts": fetch_shanghai_district_boundaries()}
 
 
+@app.get("/api/amap/shanghai-streets")
+def shanghai_street_boundaries() -> dict:
+    return {"streets": fetch_local_shanghai_street_boundaries()}
+
+
 @app.post("/api/ai/advice", response_model=AIAdviceOut)
 def ai_advice(payload: AIAdviceRequest, db: Session = Depends(get_db)):
     district = payload.district
@@ -84,11 +105,6 @@ def ai_advice(payload: AIAdviceRequest, db: Session = Depends(get_db)):
         "advice": advice,
         "is_placeholder": is_placeholder,
     }
-
-
-@app.post("/api/agent/recommend", response_model=AgentRecommendResponse)
-def agent_recommend(payload: AgentRecommendRequest, db: Session = Depends(get_db)):
-    return recommend_districts(payload, db)
 
 
 @app.post("/api/agent/recommend-houses", response_model=HouseRecommendResponse)

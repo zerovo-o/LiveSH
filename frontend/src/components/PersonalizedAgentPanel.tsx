@@ -63,7 +63,7 @@ export default function PersonalizedAgentPanel() {
       const response = await recommendHouses(payload);
       setResult(response);
     } catch {
-      setError("推荐接口暂不可用，请确认后端服务已启动并检查高德/LLM配置。");
+      setError("推荐生成失败，请检查后端、地图 key 和 LLM 配置后重试。");
       setResult(null);
     } finally {
       setLoading(false);
@@ -88,8 +88,8 @@ export default function PersonalizedAgentPanel() {
           <Sparkles className="h-4 w-4" />
         </div>
         <div>
-          <h2 className="text-base font-black text-[#33251f]">个性化通勤选房 Agent</h2>
-          <p className="text-xs text-[#806653]">固定公式打分 + LLM参与重排，输出Top小区和具体房源</p>
+          <h2 className="text-base font-black text-[#33251f]">个性化小区与房源推荐 Agent</h2>
+          <p className="text-xs text-[#806653]">规则打分 + LLM 重排，输出可解释的小区与房源推荐</p>
         </div>
       </div>
 
@@ -118,7 +118,7 @@ export default function PersonalizedAgentPanel() {
           />
         </Field>
 
-        <Field label="工作地地址">
+        <Field label="工作地点">
           <input
             className="h-9 w-full rounded-lg border border-[#ead8c2] bg-white px-3 text-sm text-[#33251f] outline-none focus:border-[#f3c99a]"
             type="text"
@@ -134,7 +134,7 @@ export default function PersonalizedAgentPanel() {
             onValueChange={(value) => setForm((prev) => ({ ...prev, commute_mode: value as CommuteMode }))}
           >
             <SelectTrigger className="h-9 w-full border-[#ead8c2] bg-white text-[#33251f]">
-              <SelectValue placeholder="选择通勤方式" />
+              <SelectValue placeholder="请选择通勤方式" />
             </SelectTrigger>
             <SelectContent>
               <SelectGroup>
@@ -163,7 +163,7 @@ export default function PersonalizedAgentPanel() {
         </Field>
 
         <div className="grid grid-cols-2 gap-2">
-          <Field label="医疗偏好权重">
+          <Field label="医疗权重">
             <input
               className="h-9 w-full rounded-lg border border-[#ead8c2] bg-white px-3 text-sm text-[#33251f] outline-none focus:border-[#f3c99a]"
               type="number"
@@ -176,7 +176,7 @@ export default function PersonalizedAgentPanel() {
               }
             />
           </Field>
-          <Field label="商业偏好权重">
+          <Field label="商业权重">
             <input
               className="h-9 w-full rounded-lg border border-[#ead8c2] bg-white px-3 text-sm text-[#33251f] outline-none focus:border-[#f3c99a]"
               type="number"
@@ -192,7 +192,7 @@ export default function PersonalizedAgentPanel() {
         </div>
 
         <div className="grid grid-cols-2 gap-2">
-          <Field label="Top小区数">
+          <Field label="Top 小区数">
             <input
               className="h-9 w-full rounded-lg border border-[#ead8c2] bg-white px-3 text-sm text-[#33251f] outline-none focus:border-[#f3c99a]"
               type="number"
@@ -205,7 +205,7 @@ export default function PersonalizedAgentPanel() {
               required
             />
           </Field>
-          <Field label="每小区房源数">
+          <Field label="每小区返回房源数">
             <input
               className="h-9 w-full rounded-lg border border-[#ead8c2] bg-white px-3 text-sm text-[#33251f] outline-none focus:border-[#f3c99a]"
               type="number"
@@ -226,7 +226,7 @@ export default function PersonalizedAgentPanel() {
           className="h-9 w-full bg-[#d45f34] text-white hover:bg-[#bd4f27]"
         >
           {loading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-          生成小区与房源推荐
+          生成推荐
         </Button>
       </form>
 
@@ -246,28 +246,21 @@ export default function PersonalizedAgentPanel() {
 
         {result?.summary ? (
           <div className="rounded-lg border border-[#f3e1cb] bg-white/80 p-3 text-xs text-[#775f4d]">
-            候选房源 {String(result.summary.candidate_houses ?? 0)} 套，路线计算 {String(result.summary.route_calls ?? 0)}
-            次，LLM小区重排 {String(result.summary.community_rerank_applied ?? false)}。
+            候选房源：{String(result.summary.candidate_houses ?? 0)}，路线调用：{String(result.summary.route_calls ?? 0)}，
+            小区 LLM 重排：{String(result.summary.community_rerank_applied ?? false)}
           </div>
         ) : null}
 
         {!loading && result && communities.length === 0 ? (
           <div className="rounded-lg border border-[#f3e1cb] bg-white/80 p-3 text-sm text-[#775f4d]">
-            暂无可推荐小区，请放宽预算或通勤约束后重试。
+            当前条件下没有筛选到小区，请调整预算、通勤或权重后重试。
           </div>
         ) : null}
 
         {communities.map((community, index) => {
           const key = `${community.district}|${community.sub_district}|${community.community_name}`;
           const groupHouses = housesByCommunity.get(key) ?? [];
-          return (
-            <CommunityCard
-              key={key}
-              rank={index + 1}
-              community={community}
-              houses={groupHouses}
-            />
-          );
+          return <CommunityCard key={key} rank={index + 1} community={community} houses={groupHouses} />;
         })}
       </div>
     </aside>
@@ -299,7 +292,7 @@ function CommunityCard({
       <CardHeader className="pb-2">
         <CardTitle className="flex items-start justify-between gap-2 text-sm text-[#3c2a20]">
           <span>
-            Top {rank} · {community.community_name}
+            Top {rank} / {community.community_name}
           </span>
           <Badge className="bg-[#33a985] text-white">{Math.round(community.score * 100)} 分</Badge>
         </CardTitle>
@@ -307,13 +300,13 @@ function CommunityCard({
       <CardContent className="space-y-2 text-xs text-[#5f4a3d]">
         <div className="rounded-md border border-[#f3e1cb] bg-white/75 p-2">
           <div className="text-[11px] text-[#806653]">
-            {community.district} · {community.sub_district}
+            {community.district} / {community.sub_district}
           </div>
           <div className="mt-1 grid grid-cols-2 gap-1 text-[11px] text-[#6e5543]">
             <span>{formatPrice(community.avg_unit_price)}</span>
             <span>{community.avg_total_price.toFixed(1)} 万</span>
             <span>通勤 {commuteLabel}</span>
-            <span>房源 {community.house_count} 套</span>
+            <span>房源 {community.house_count} 条</span>
           </div>
         </div>
         <div>
@@ -321,8 +314,8 @@ function CommunityCard({
           <p className="mt-1 leading-5">{community.reason}</p>
         </div>
         <div className="text-[11px] text-[#6e5543]">
-          预算匹配 {Math.round(community.budget_match_score * 100)} · 配套 {Math.round(community.poi_score * 100)} ·
-          交通 {Math.round(community.traffic_score * 100)}
+          预算匹配 {Math.round(community.budget_match_score * 100)} / POI {Math.round(community.poi_score * 100)} /
+          通勤 {Math.round(community.traffic_score * 100)}
         </div>
 
         <div className="space-y-2">
@@ -339,8 +332,10 @@ function CommunityCard({
               <div className="mt-1 grid grid-cols-2 gap-1 text-[11px] text-[#6e5543]">
                 <span>{formatPrice(house.unit_price)}</span>
                 <span>{house.total_price.toFixed(1)} 万</span>
-                <span>{house.commute_minutes === null ? "通勤暂无" : `通勤${Math.round(house.commute_minutes)}分钟`}</span>
-                <span>{house.area === null ? "面积未知" : `${house.area.toFixed(1)}㎡`}</span>
+                <span>
+                  {house.commute_minutes === null ? "通勤暂无" : `通勤 ${Math.round(house.commute_minutes)} 分钟`}
+                </span>
+                <span>{house.area === null ? "面积未知" : `${house.area.toFixed(1)} ㎡`}</span>
               </div>
             </div>
           ))}
@@ -349,4 +344,3 @@ function CommunityCard({
     </Card>
   );
 }
-
