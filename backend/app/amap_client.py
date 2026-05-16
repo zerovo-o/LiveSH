@@ -12,7 +12,7 @@ from .config import AMAP_WEB_SERVICE_KEY
 GeocodeLocation = tuple[float, float]
 CommuteMode = Literal["transit", "driving"]
 
-GEOCODE_URL = "https://restapi.amap.com/v3/geocode/geo"
+GEOCODE_URL = "https://restapi.amap.com/v3/geocode/geo?"
 DRIVING_URL = "https://restapi.amap.com/v5/direction/driving"
 TRANSIT_URL = "https://restapi.amap.com/v5/direction/transit/integrated"
 
@@ -72,6 +72,7 @@ def geocode_address(address: str, city: str = "上海") -> GeocodeLocation | Non
         {
             "address": address,
             "city": city,
+            "output": "JSON",
         },
     )
     if not result.ok or not result.data:
