@@ -1,6 +1,6 @@
 import { Loader2 } from "lucide-react";
-import { memo, useEffect, useMemo, useRef, useState } from "react";
-import { normalizeDistrictName, scoreColor } from "../lib/utils";
+import { memo, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { normalizeDistrictName } from "../lib/utils";
 import type { DistrictMetric, StreetMetric } from "../types/metrics";
 
 declare global {
@@ -17,7 +17,7 @@ type MapPanelProps = {
   onSelectDistrict: (district: string) => void;
 };
 
-type MapMode = "score" | "price" | "poi" | "activity";
+type MapMode = "calibrated" | "lifeCircle" | "e2sfca" | "robust" | "access" | "value" | "price" | "poi" | "activity";
 type DistrictBoundary = {
   name: string;
   adcode?: string;
@@ -35,8 +35,15 @@ type StreetPolygonEntry = {
   district: string;
   street: string;
 };
+type DistrictBubblePosition = {
+  district: string;
+  x: number;
+  y: number;
+  metric: DistrictMetric;
+};
 
 const SHANGHAI_CENTER: [number, number] = [121.4737, 31.2304];
+const DEFAULT_SHOW_STREET_BOUNDARIES = true;
 
 const mapModes: Record<
   MapMode,
@@ -49,12 +56,52 @@ const mapModes: Record<
     format: (value: number) => string;
   }
 > = {
-  score: {
-    label: "综合评分",
+  calibrated: {
+    label: "校准评分",
     unit: "",
-    low: "#fca5a5",
+    low: "#dcfce7",
+    high: "#15803d",
+    value: (item) => item.calibrated_score_life_circle ?? 0,
+    format: (value) => value.toFixed(3)
+  },
+  lifeCircle: {
+    label: "生活圈",
+    unit: "",
+    low: "#ede9fe",
+    high: "#7c3aed",
+    value: (item) => item.life_circle_score ?? 0,
+    format: (value) => value.toFixed(3)
+  },
+  e2sfca: {
+    label: "供需可达性",
+    unit: "",
+    low: "#e0f2fe",
+    high: "#0284c7",
+    value: (item) => item.e2sfca_access_score ?? 0,
+    format: (value) => value.toFixed(3)
+  },
+  robust: {
+    label: "稳健评分",
+    unit: "",
+    low: "#fee2e2",
     high: "#ef4444",
-    value: (item) => item.livability_score,
+    value: (item) => item.livability_score_v2 ?? 0,
+    format: (value) => value.toFixed(3)
+  },
+  access: {
+    label: "可达性",
+    unit: "",
+    low: "#dbeafe",
+    high: "#2563eb",
+    value: (item) => item.access_score ?? 0,
+    format: (value) => value.toFixed(3)
+  },
+  value: {
+    label: "性价比",
+    unit: "",
+    low: "#dcfce7",
+    high: "#16a34a",
+    value: (item) => item.value_score ?? 0,
     format: (value) => value.toFixed(3)
   },
   price: {
@@ -82,6 +129,8 @@ const mapModes: Record<
     format: (value) => Math.round(value).toLocaleString("zh-CN")
   }
 };
+
+const visibleMapModes: MapMode[] = ["calibrated", "lifeCircle", "price", "poi", "activity"];
 
 function hexToRgb(hex: string) {
   const normalized = hex.replace("#", "");
@@ -151,16 +200,18 @@ const MapPanel = memo(function MapPanel({ districts, selectedDistrict, recommend
   const districtOutlineRef = useRef<Record<string, any[]>>({});
   const streetPolygonsRef = useRef<StreetPolygonEntry[]>([]);
   const infoWindowRef = useRef<any>(null);
+  const bubbleFrameRef = useRef<number | null>(null);
   const selectedDistrictRef = useRef<string | null>(selectedDistrict);
-  const mapModeRef = useRef<MapMode>("score");
-  const showStreetBoundariesRef = useRef(true);
+  const mapModeRef = useRef<MapMode>("calibrated");
+  const showStreetBoundariesRef = useRef(DEFAULT_SHOW_STREET_BOUNDARIES);
   const metricByNameRef = useRef<Map<string, DistrictMetric>>(new Map());
   const streetMetricByKeyRef = useRef<Map<string, StreetMetric>>(new Map());
   const [loading, setLoading] = useState(true);
   const [mapError, setMapError] = useState<string | null>(null);
-  const [mapMode, setMapMode] = useState<MapMode>("score");
+  const [mapMode, setMapMode] = useState<MapMode>("calibrated");
   const [streetMetrics, setStreetMetrics] = useState<StreetMetric[]>([]);
-  const [showStreetBoundaries, setShowStreetBoundaries] = useState(true);
+  const [showStreetBoundaries, setShowStreetBoundaries] = useState(DEFAULT_SHOW_STREET_BOUNDARIES);
+  const [districtBubbles, setDistrictBubbles] = useState<DistrictBubblePosition[]>([]);
 
   const metricByName = useMemo(() => {
     const map = new Map<string, DistrictMetric>();
@@ -174,11 +225,14 @@ const MapPanel = memo(function MapPanel({ districts, selectedDistrict, recommend
     return map;
   }, [streetMetrics]);
 
-  const heatmapMetrics = useMemo(() => (streetMetrics.length > 0 ? streetMetrics : districts), [districts, streetMetrics]);
+  const heatmapMetrics = useMemo(
+    () => (showStreetBoundaries && streetMetrics.length > 0 ? streetMetrics : districts),
+    [districts, showStreetBoundaries, streetMetrics]
+  );
 
   const modeStats = useMemo(() => {
     const config = mapModes[mapMode];
-    const values = heatmapMetrics.map(config.value);
+    const values = heatmapMetrics.map(config.value).filter((value) => Number.isFinite(value));
     const min = values.length ? Math.min(...values) : 0;
     const max = values.length ? Math.max(...values) : 1;
     return { min, max, config };
@@ -208,7 +262,7 @@ const MapPanel = memo(function MapPanel({ districts, selectedDistrict, recommend
 
   const getModeRatio = (item: DistrictMetric, mode: MapMode, source: DistrictMetric[]) => {
     const config = mapModes[mode];
-    const values = source.map(config.value);
+    const values = source.map(config.value).filter((value) => Number.isFinite(value));
     const min = values.length ? Math.min(...values) : 0;
     const max = values.length ? Math.max(...values) : 1;
     if (max === min) return 0.5;
@@ -216,8 +270,8 @@ const MapPanel = memo(function MapPanel({ districts, selectedDistrict, recommend
   };
 
   const getModeColor = (item: DistrictMetric, mode: MapMode, source: DistrictMetric[]) => {
-    if (mode === "score") return scoreColor(item.livability_score);
     const config = mapModes[mode];
+    if (!Number.isFinite(config.value(item))) return "#f3f4f6";
     return mixColor(config.low, config.high, getModeRatio(item, mode, source));
   };
 
@@ -226,14 +280,35 @@ const MapPanel = memo(function MapPanel({ districts, selectedDistrict, recommend
     return Math.round(36 + ratio * 28);
   };
 
-  const getBubbleHtml = (item: DistrictMetric, mode: MapMode, source: DistrictMetric[]) => {
+  const getPixelXY = (pixel: any) => ({
+    x: typeof pixel.getX === "function" ? pixel.getX() : pixel.x,
+    y: typeof pixel.getY === "function" ? pixel.getY() : pixel.y
+  });
+
+  const updateDistrictBubblePositions = useCallback(() => {
+    const map = mapRef.current;
+    if (!map || !window.AMap) return;
+    const next = districts.flatMap((metric) => {
+      if (metric.center_lng === null || metric.center_lat === null) return [];
+      const pixel = map.lngLatToContainer(new window.AMap.LngLat(metric.center_lng, metric.center_lat));
+      const { x, y } = getPixelXY(pixel);
+      if (!Number.isFinite(x) || !Number.isFinite(y)) return [];
+      return [{ district: metric.district, x, y, metric }];
+    });
+    setDistrictBubbles(next);
+  }, [districts]);
+
+  const scheduleDistrictBubbleUpdate = useCallback(() => {
+    if (bubbleFrameRef.current !== null) return;
+    bubbleFrameRef.current = window.requestAnimationFrame(() => {
+      bubbleFrameRef.current = null;
+      updateDistrictBubblePositions();
+    });
+  }, [updateDistrictBubblePositions]);
+
+  const getBubbleLabel = (item: DistrictMetric, mode: MapMode) => {
     const config = mapModes[mode];
-    const color = getModeColor(item, mode, source);
-    const size = getBubbleSize(item, mode, source);
-    return `<button class="metric-bubble" style="--bubble-color:${color};width:${size}px;height:${size}px" title="${item.district}">
-      <span class="metric-bubble-name">${item.district}</span>
-      <span class="metric-bubble-value">${config.format(config.value(item))}</span>
-    </button>`;
+    return config.format(config.value(item));
   };
 
   useEffect(() => {
@@ -259,6 +334,13 @@ const MapPanel = memo(function MapPanel({ districts, selectedDistrict, recommend
           const clearPolygons = (items: any[]) => {
             items.forEach((polygon) => map.remove(polygon));
           };
+          const refreshDistrictBubbles = () => scheduleDistrictBubbleUpdate();
+          map.on("mapmove", refreshDistrictBubbles);
+          map.on("moveend", refreshDistrictBubbles);
+          map.on("zoomchange", refreshDistrictBubbles);
+          map.on("zoomend", refreshDistrictBubbles);
+          map.on("resize", refreshDistrictBubbles);
+          window.setTimeout(refreshDistrictBubbles, 0);
 
           const drawDistrictOutlines = (districtList: DistrictBoundary[]) => {
             if (cancelled) return;
@@ -284,16 +366,20 @@ const MapPanel = memo(function MapPanel({ districts, selectedDistrict, recommend
             });
           };
 
-          const drawStreetHeatmap = (streetList: StreetBoundary[]) => {
+          const drawStreetHeatmap = (streetList: StreetBoundary[], metricsForDraw?: StreetMetric[]) => {
             if (cancelled) return;
             clearPolygons(streetPolygonsRef.current.map((entry) => entry.polygon));
             streetPolygonsRef.current = [];
             if (!streetList.length) return;
 
-            const source = streetMetrics.length > 0 ? streetMetrics : districts;
+            const metricMap =
+              metricsForDraw && metricsForDraw.length > 0
+                ? new Map(metricsForDraw.map((item) => [streetKey(item.district, item.street), item]))
+                : streetMetricByKeyRef.current;
+            const source = metricsForDraw && metricsForDraw.length > 0 ? metricsForDraw : districts;
             streetList.forEach((street) => {
               const districtName = normalizeDistrictName(street.district);
-              const metric = streetMetricByKeyRef.current.get(streetKey(districtName, street.name));
+              const metric = metricMap.get(streetKey(districtName, street.name));
               street.boundaries.forEach((boundary: any) => {
                 const polygon = new AMap.Polygon({
                   path: boundary,
@@ -318,6 +404,13 @@ const MapPanel = memo(function MapPanel({ districts, selectedDistrict, recommend
                           <div>房价: <b>${Math.round(metric.avg_price).toLocaleString("zh-CN")} 元/㎡</b></div>
                           <div>POI: <b>${metric.poi_total.toLocaleString("zh-CN")}</b></div>
                           <div>商圈活跃度: <b>${metric.business_activity.toFixed(1)}</b></div>
+                          <div>校准评分: <b>${(metric.calibrated_score_life_circle ?? 0).toFixed(3)}</b></div>
+                          <div>生活圈: <b>${(metric.life_circle_score ?? 0).toFixed(3)}</b></div>
+                          <div>5/10/15分钟: <b>${(metric.life_circle_5min_score ?? 0).toFixed(3)} / ${(metric.life_circle_10min_score ?? 0).toFixed(3)} / ${(metric.life_circle_15min_score ?? 0).toFixed(3)}</b></div>
+                          <div>供需可达性: <b>${(metric.e2sfca_access_score ?? 0).toFixed(3)}</b></div>
+                          <div>可达性分: <b>${(metric.access_score ?? 0).toFixed(3)}</b></div>
+                          <div>性价比分: <b>${(metric.value_score ?? 0).toFixed(3)}</b></div>
+                          ${(metric.sample_reliability_score ?? 1) < 1 ? `<div>样本不足，评分已降权</div>` : ""}
                         </div>`
                       : `<div class="map-tooltip">
                           <div class="map-tooltip-title">${districtName} · ${street.name}</div>
@@ -343,7 +436,7 @@ const MapPanel = memo(function MapPanel({ districts, selectedDistrict, recommend
             if (cancelled) return;
             clearPolygons(Object.values(polygonsRef.current).flat());
             polygonsRef.current = {};
-          if (districtList.length === 0) {
+            if (districtList.length === 0) {
               setMapError("没有获取到上海行政区边界，请检查高德行政区查询服务权限。");
               setLoading(false);
               return;
@@ -372,7 +465,13 @@ const MapPanel = memo(function MapPanel({ districts, selectedDistrict, recommend
                       <div class="map-tooltip-title">${name}</div>
                       <div>平均房价: <b>${Math.round(metric.avg_price).toLocaleString("zh-CN")} 元/㎡</b></div>
                       <div>POI: <b>${metric.poi_total.toLocaleString("zh-CN")}</b></div>
-                      <div>宜居评分: <b>${metric.livability_score.toFixed(3)}</b></div>
+                      <div>稳健评分: <b>${(metric.livability_score_v2 ?? 0).toFixed(3)}</b></div>
+                      <div>校准评分: <b>${(metric.calibrated_score_life_circle ?? 0).toFixed(3)}</b></div>
+                      <div>生活圈: <b>${(metric.life_circle_score ?? 0).toFixed(3)}</b></div>
+                      <div>5/10/15分钟: <b>${(metric.life_circle_5min_score ?? 0).toFixed(3)} / ${(metric.life_circle_10min_score ?? 0).toFixed(3)} / ${(metric.life_circle_15min_score ?? 0).toFixed(3)}</b></div>
+                      <div>供需可达性: <b>${(metric.e2sfca_access_score ?? 0).toFixed(3)}</b></div>
+                      <div>可达性分: <b>${(metric.access_score ?? 0).toFixed(3)}</b></div>
+                      ${(metric.sample_reliability_score ?? 1) < 1 ? `<div>样本不足，评分已降权</div>` : ""}
                     </div>`
                   );
                   infoWindowRef.current?.open(map, event.lnglat);
@@ -387,7 +486,8 @@ const MapPanel = memo(function MapPanel({ districts, selectedDistrict, recommend
               polygonsRef.current[name] = polygons;
             });
 
-            drawStreetHeatmap(streetListCache.current ?? []);
+            drawStreetHeatmap(streetListCache.current ?? [], streetMetricsRef.current);
+            refreshDistrictBubbles();
             setLoading(false);
           };
 
@@ -415,7 +515,7 @@ const MapPanel = memo(function MapPanel({ districts, selectedDistrict, recommend
               if (cancelled) return;
               if (boundaryTimer) window.clearTimeout(boundaryTimer);
               if (status !== "complete") {
-              loadBackendBoundaries();
+                loadBackendBoundaries();
                 return;
               }
               const districtList = (result?.districtList?.[0]?.districtList ?? []).map((district: any) => ({
@@ -429,14 +529,16 @@ const MapPanel = memo(function MapPanel({ districts, selectedDistrict, recommend
           };
 
           const streetListCache: { current: StreetBoundary[] } = { current: [] };
+          const streetMetricsRef: { current: StreetMetric[] } = { current: [] };
           Promise.all([fetchStreetBoundaries(), fetchStreetMetrics()])
             .then(([streetBoundaries, metrics]) => {
               streetListCache.current = streetBoundaries;
+              streetMetricsRef.current = metrics;
               setStreetMetrics(metrics);
               streetMetricByKeyRef.current = new Map(
                 metrics.map((item) => [streetKey(item.district, item.street), item])
               );
-              drawStreetHeatmap(streetBoundaries);
+              drawStreetHeatmap(streetBoundaries, metrics);
             })
             .catch(() => undefined);
           loadOfficialDistrictBoundaries();
@@ -452,8 +554,16 @@ const MapPanel = memo(function MapPanel({ districts, selectedDistrict, recommend
     return () => {
       cancelled = true;
       if (boundaryTimer) window.clearTimeout(boundaryTimer);
+      if (bubbleFrameRef.current !== null) {
+        window.cancelAnimationFrame(bubbleFrameRef.current);
+        bubbleFrameRef.current = null;
+      }
     };
-  }, [districts, metricByName, onSelectDistrict, recommendationNames, recommendations, selectedDistrict]);
+  }, [districts, metricByName, onSelectDistrict, recommendationNames, recommendations, scheduleDistrictBubbleUpdate, selectedDistrict]);
+
+  useEffect(() => {
+    scheduleDistrictBubbleUpdate();
+  }, [mapMode, scheduleDistrictBubbleUpdate, showStreetBoundaries]);
 
   useEffect(() => {
     Object.entries(polygonsRef.current).forEach(([name, polygons]) => {
@@ -469,7 +579,7 @@ const MapPanel = memo(function MapPanel({ districts, selectedDistrict, recommend
         });
       });
     });
-    const source = streetMetrics.length > 0 ? streetMetrics : districts;
+    const source = showStreetBoundaries && streetMetrics.length > 0 ? streetMetrics : districts;
     streetPolygonsRef.current.forEach(({ polygon, district, street }) => {
       const metric = streetMetricByKey.get(streetKey(district, street));
       polygon.setOptions({
@@ -478,7 +588,7 @@ const MapPanel = memo(function MapPanel({ districts, selectedDistrict, recommend
         strokeOpacity: metric ? 0.55 : 0.4
       });
     });
-  }, [districts, mapMode, metricByName, recommendationNames, selectedDistrict, streetMetricByKey, streetMetrics]);
+  }, [districts, mapMode, metricByName, recommendationNames, selectedDistrict, showStreetBoundaries, streetMetricByKey, streetMetrics]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -490,13 +600,16 @@ const MapPanel = memo(function MapPanel({ districts, selectedDistrict, recommend
         map.remove(polygon);
       }
     });
+    if (!showStreetBoundaries) {
+      infoWindowRef.current?.close();
+    }
   }, [showStreetBoundaries]);
 
   return (
     <section className="relative h-full overflow-hidden rounded-lg border border-slate-200 bg-white shadow-soft">
       <div className="absolute right-4 top-4 z-20 rounded-lg border border-[#ead8c2]/70 bg-white/80 px-3 py-3 text-sm shadow-soft backdrop-blur-md">
         <div className="flex flex-nowrap gap-2">
-          {(Object.keys(mapModes) as MapMode[]).map((mode) => (
+          {visibleMapModes.map((mode) => (
             <button
               key={mode}
               type="button"
@@ -519,10 +632,7 @@ const MapPanel = memo(function MapPanel({ districts, selectedDistrict, recommend
           <div
             className="h-2 rounded-full"
             style={{
-              background:
-                mapMode === "score"
-                  ? "linear-gradient(90deg,#ef4444,#f59e0b,#a3e635,#16a34a)"
-                  : `linear-gradient(90deg,${modeStats.config.low},${modeStats.config.high})`
+              background: `linear-gradient(90deg,${modeStats.config.low},${modeStats.config.high})`
             }}
           />
           <div className="mt-2 flex justify-between">
@@ -540,12 +650,40 @@ const MapPanel = memo(function MapPanel({ districts, selectedDistrict, recommend
                 : "border-[#ead8c2] bg-white text-[#775f4d] hover:border-[#f3c99a] hover:bg-[#fff9ef]"
             }`}
           >
-            {showStreetBoundaries ? "隐藏街镇边界" : "显示街镇边界"}
+            {showStreetBoundaries ? "隐藏街道边界" : "显示街道边界"}
           </button>
         </div>
       </div>
 
       <div ref={containerRef} className="h-full w-full" />
+      <div className="pointer-events-none absolute inset-0 z-[18]">
+        {districtBubbles.map(({ district, x, y, metric }) => {
+          const color = getModeColor(metric, mapMode, districts);
+          const size = getBubbleSize(metric, mapMode, districts);
+          return (
+            <button
+              key={district}
+              type="button"
+              title={district}
+              onClick={() => onSelectDistrict(district)}
+              className="metric-bubble pointer-events-auto absolute"
+              style={
+                {
+                  "--bubble-color": color,
+                  left: `${x}px`,
+                  top: `${y}px`,
+                  width: `${size}px`,
+                  height: `${size}px`,
+                  transform: "translate(-50%, -50%)"
+                } as CSSProperties
+              }
+            >
+              <span className="metric-bubble-name">{district}</span>
+              <span className="metric-bubble-value">{getBubbleLabel(metric, mapMode)}</span>
+            </button>
+          );
+        })}
+      </div>
       {(loading || mapError) && (
         <div className="absolute inset-0 z-30 flex items-center justify-center bg-white/70 text-sm text-slate-600 backdrop-blur-sm">
           {loading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
