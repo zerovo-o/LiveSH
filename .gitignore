@@ -171,8 +171,3 @@ data/sh_poi_raw/sh_traffic facility/
 
 # Python packaging artifacts
 *.egg-info/
-
-# local data and papers
-archive-2/
-datanew/
-paper/
