@@ -11,7 +11,16 @@ from sqlalchemy import delete
 from .config import DATA_DIR
 from .database import Base, SessionLocal, engine
 from .geo import normalize_district, wgs84_to_gcj02
+from .metrics import (
+    add_phase1_scores,
+    attach_phase2_scores,
+    attach_phase4_scores,
+    build_demand_points,
+    compute_e2sfca_house_features,
+    compute_house_features,
+)
 from .models import DistrictMetric, HouseListing, PoiCategoryMetric, PoiPoint, StreetMetric
+from .poi_taxonomy import add_poi_classification_columns, build_poi_subtype_audit
 
 CATEGORY_BY_SOURCE = {
     "sh_shopping": "购物",
@@ -41,6 +50,11 @@ def minmax(series: pd.Series) -> pd.Series:
     if hi == lo:
         return pd.Series([0.5] * len(series), index=series.index)
     return (series - lo) / (hi - lo)
+
+
+def records_for_insert(frame: pd.DataFrame) -> list[dict]:
+    clean = frame.replace([float("inf"), -float("inf")], pd.NA).astype(object)
+    return clean.where(pd.notna(clean), None).to_dict(orient="records")
 
 
 def point_in_ring(x: float, y: float, ring: list[tuple[float, float]]) -> bool:
@@ -102,10 +116,42 @@ def assign_streets(rows: pd.DataFrame, streets: list[dict]) -> pd.DataFrame:
     return rows
 
 
-def load_house_rows(path: Path) -> pd.DataFrame:
-    df = pd.read_parquet(path)
+STANDARD_HOUSE_COLUMNS = [
+    "house_id",
+    "district",
+    "street",
+    "price",
+    "unit_price",
+    "wgs84_lng",
+    "wgs84_lat",
+    "gcj02_lng",
+    "gcj02_lat",
+]
+
+
+def load_standard_house_rows(df: pd.DataFrame) -> pd.DataFrame:
+    cols = [column for column in STANDARD_HOUSE_COLUMNS if column in df.columns]
+    result = df[cols].copy()
+    if "street" not in result.columns:
+        result["street"] = None
+    if "is_valid_for_algorithm" in df.columns:
+        result = result[df["is_valid_for_algorithm"].fillna(False).astype(bool)].copy()
+    result = result.dropna(subset=["house_id", "district", "price", "unit_price", "wgs84_lng", "wgs84_lat", "gcj02_lng", "gcj02_lat"])
+    result = result.drop_duplicates(subset=["house_id"])
+    result["district"] = result["district"].map(normalize_district)
+    numeric_cols = ["price", "unit_price", "wgs84_lng", "wgs84_lat", "gcj02_lng", "gcj02_lat"]
+    for column in numeric_cols:
+        result[column] = pd.to_numeric(result[column], errors="coerce")
+    result = result.dropna(subset=numeric_cols)
+    return result[(result["wgs84_lng"].between(120.5, 122.2)) & (result["wgs84_lat"].between(30.5, 31.9))]
+
+
+def load_legacy_house_rows(df: pd.DataFrame) -> pd.DataFrame:
     cols = ["house_id", "district", "listing_total_price", "listing_unit_price", "longitude", "latitude"]
-    df = df[cols].rename(
+    missing = set(cols) - set(df.columns)
+    if missing:
+        raise ValueError(f"house data missing required columns: {sorted(missing)}")
+    result = df[cols].rename(
         columns={
             "listing_total_price": "price",
             "listing_unit_price": "unit_price",
@@ -113,14 +159,22 @@ def load_house_rows(path: Path) -> pd.DataFrame:
             "latitude": "wgs84_lat",
         }
     )
-    df = df.dropna(subset=["district", "price", "unit_price", "wgs84_lng", "wgs84_lat"])
-    df = df.drop_duplicates(subset=["house_id"])
-    df["district"] = df["district"].map(normalize_district)
-    df = df[(df["wgs84_lng"].between(120.5, 122.2)) & (df["wgs84_lat"].between(30.5, 31.9))]
-    gcj = df.apply(lambda r: wgs84_to_gcj02(float(r["wgs84_lng"]), float(r["wgs84_lat"])), axis=1)
-    df["gcj02_lng"] = [item[0] for item in gcj]
-    df["gcj02_lat"] = [item[1] for item in gcj]
-    return df
+    result = result.dropna(subset=["district", "price", "unit_price", "wgs84_lng", "wgs84_lat"])
+    result = result.drop_duplicates(subset=["house_id"])
+    result["district"] = result["district"].map(normalize_district)
+    result = result[(result["wgs84_lng"].between(120.5, 122.2)) & (result["wgs84_lat"].between(30.5, 31.9))]
+    gcj = result.apply(lambda r: wgs84_to_gcj02(float(r["wgs84_lng"]), float(r["wgs84_lat"])), axis=1)
+    result["gcj02_lng"] = [item[0] for item in gcj]
+    result["gcj02_lat"] = [item[1] for item in gcj]
+    result["street"] = None
+    return result[STANDARD_HOUSE_COLUMNS]
+
+
+def load_house_rows(path: Path) -> pd.DataFrame:
+    df = pd.read_parquet(path)
+    if {"price", "unit_price", "wgs84_lng", "wgs84_lat", "gcj02_lng", "gcj02_lat"}.issubset(df.columns):
+        return load_standard_house_rows(df)[STANDARD_HOUSE_COLUMNS]
+    return load_legacy_house_rows(df)
 
 
 def iter_poi_rows(raw_dir: Path):
@@ -195,6 +249,7 @@ def build_metrics(houses: pd.DataFrame, pois: pd.DataFrame) -> tuple[pd.DataFram
             "住宅": "residence_count",
         }
     )
+    metrics = add_phase1_scores(metrics)
     category_counts = pd.DataFrame(
         [{"category": category, "count": count} for category, count in Counter(pois["category"]).items()]
     )
@@ -229,7 +284,7 @@ def build_street_metrics(houses: pd.DataFrame, pois: pd.DataFrame) -> pd.DataFra
     metrics["activity_norm"] = minmax(metrics["business_activity"])
     metrics["price_norm"] = minmax(metrics["avg_price"])
     metrics["livability_score"] = metrics["activity_norm"] - metrics["price_norm"]
-    return metrics.reset_index().rename(
+    metrics = metrics.reset_index().rename(
         columns={
             "购物": "shopping_count",
             "医疗": "healthcare_count",
@@ -239,40 +294,64 @@ def build_street_metrics(houses: pd.DataFrame, pois: pd.DataFrame) -> pd.DataFra
             "住宅": "residence_count",
         }
     )
+    return add_phase1_scores(metrics)
 
 
-def ingest(data_dir: Path = DATA_DIR) -> None:
+def ingest(data_dir: Path = DATA_DIR, house_path: Path | None = None) -> None:
     Base.metadata.drop_all(bind=engine)
     Base.metadata.create_all(bind=engine)
     street_shapes = load_street_shapes(data_dir / "sh_street_boundary" / "shanghai_street_boundary.shp")
-    houses = load_house_rows(data_dir / "sh_house_dataset_raw.parquet")
+    resolved_house_path = house_path or data_dir / "sh_house_dataset_raw.parquet"
+    houses = load_house_rows(resolved_house_path)
     pois = pd.DataFrame(iter_poi_rows(data_dir / "sh_poi_raw"))
-    houses = assign_streets(houses, street_shapes)
+    pois = add_poi_classification_columns(pois)
+    if houses["street"].isna().any():
+        houses = assign_streets(houses, street_shapes)
     pois = assign_streets(pois, street_shapes)
     metrics, category_counts = build_metrics(houses, pois)
     street_metrics = build_street_metrics(houses, pois)
+    house_features = compute_house_features(houses, pois)
+    demand_points = build_demand_points(houses, pois)
+    phase4_house_features = compute_e2sfca_house_features(house_features, demand_points, pois)
+    derived_dir = data_dir / "derived"
+    derived_dir.mkdir(parents=True, exist_ok=True)
+    house_features.to_parquet(derived_dir / "house_features_current.parquet", index=False)
+    demand_points.to_parquet(derived_dir / "demand_points_current.parquet", index=False)
+    phase4_house_features.to_parquet(derived_dir / "house_features_phase4_current.parquet", index=False)
+    build_poi_subtype_audit(pois).to_csv(derived_dir / "poi_subtype_audit.csv", index=False)
+    metrics = attach_phase2_scores(metrics, house_features, ["district"])
+    street_metrics = attach_phase2_scores(street_metrics, house_features, ["district", "street"])
+    metrics = attach_phase4_scores(metrics, phase4_house_features, ["district"], reliability_house_threshold=50)
+    street_metrics = attach_phase4_scores(
+        street_metrics,
+        phase4_house_features,
+        ["district", "street"],
+        reliability_house_threshold=10,
+    )
 
     with SessionLocal.begin() as db:
         for table in [HouseListing, PoiPoint, DistrictMetric, StreetMetric, PoiCategoryMetric]:
             db.execute(delete(table))
-        db.bulk_insert_mappings(HouseListing, houses.to_dict(orient="records"))
-        db.bulk_insert_mappings(PoiPoint, pois.to_dict(orient="records"))
-        db.bulk_insert_mappings(DistrictMetric, metrics.to_dict(orient="records"))
+        db.bulk_insert_mappings(HouseListing, records_for_insert(houses))
+        db.bulk_insert_mappings(PoiPoint, records_for_insert(pois))
+        db.bulk_insert_mappings(DistrictMetric, records_for_insert(metrics))
         if not street_metrics.empty:
-            db.bulk_insert_mappings(StreetMetric, street_metrics.to_dict(orient="records"))
-        db.bulk_insert_mappings(PoiCategoryMetric, category_counts.to_dict(orient="records"))
+            db.bulk_insert_mappings(StreetMetric, records_for_insert(street_metrics))
+        db.bulk_insert_mappings(PoiCategoryMetric, records_for_insert(category_counts))
 
     print(
         f"ingested houses={len(houses)} pois={len(pois)} "
-        f"districts={len(metrics)} streets={len(street_metrics)}"
+        f"districts={len(metrics)} streets={len(street_metrics)} "
+        f"house_path={resolved_house_path}"
     )
 
 
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--data-dir", default=str(DATA_DIR))
+    parser.add_argument("--house-path", default=None, help="Optional parquet path for a standard house table.")
     args = parser.parse_args()
-    ingest(Path(args.data_dir))
+    ingest(Path(args.data_dir), Path(args.house_path) if args.house_path else None)
 
 
 if __name__ == "__main__":

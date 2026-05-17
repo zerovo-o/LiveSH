@@ -19,6 +19,35 @@ class DistrictMetricOut(BaseModel):
     activity_norm: float
     price_norm: float
     livability_score: float
+    poi_diversity: float
+    shopping_per_house: float
+    traffic_per_house: float
+    healthcare_per_house: float
+    recreation_per_house: float
+    company_per_house: float
+    cost_pressure: float
+    affordability_score: float
+    service_score: float
+    vitality_score: float
+    livability_score_v2: float
+    shopping_access: float
+    traffic_access: float
+    healthcare_access: float
+    recreation_access: float
+    company_access: float
+    nearest_traffic_distance: float | None = None
+    nearest_healthcare_distance: float | None = None
+    access_score: float
+    value_score: float
+    shopping_e2sfca_access: float
+    traffic_e2sfca_access: float
+    healthcare_e2sfca_access: float
+    recreation_e2sfca_access: float
+    company_e2sfca_access: float
+    e2sfca_access_score: float
+    e2sfca_value_score: float
+    sample_reliability_score: float
+    calibrated_score: float
     center_lng: float | None = None
     center_lat: float | None = None
 
@@ -50,6 +79,35 @@ class StreetMetricOut(BaseModel):
     activity_norm: float
     price_norm: float
     livability_score: float
+    poi_diversity: float
+    shopping_per_house: float
+    traffic_per_house: float
+    healthcare_per_house: float
+    recreation_per_house: float
+    company_per_house: float
+    cost_pressure: float
+    affordability_score: float
+    service_score: float
+    vitality_score: float
+    livability_score_v2: float
+    shopping_access: float
+    traffic_access: float
+    healthcare_access: float
+    recreation_access: float
+    company_access: float
+    nearest_traffic_distance: float | None = None
+    nearest_healthcare_distance: float | None = None
+    access_score: float
+    value_score: float
+    shopping_e2sfca_access: float
+    traffic_e2sfca_access: float
+    healthcare_e2sfca_access: float
+    recreation_e2sfca_access: float
+    company_e2sfca_access: float
+    e2sfca_access_score: float
+    e2sfca_value_score: float
+    sample_reliability_score: float
+    calibrated_score: float
     center_lng: float | None = None
     center_lat: float | None = None
 
