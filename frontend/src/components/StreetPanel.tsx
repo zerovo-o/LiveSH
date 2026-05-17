@@ -4,7 +4,7 @@ import { Badge } from "./ui/badge";
 import { Button } from "./ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from "./ui/select";
-import { formatPrice, formatScore } from "../lib/utils";
+import { formatPrice } from "../lib/utils";
 import type { DistrictMetric, StreetMetric } from "../types/metrics";
 
 type StreetPanelProps = {
@@ -14,6 +14,23 @@ type StreetPanelProps = {
 };
 
 const ALL_VALUE = "全部区域";
+const STREET_RECOMMENDATION_MIN_HOUSE_COUNT = 50;
+
+function formatOptionalScore(value: number | null | undefined) {
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? numeric.toFixed(3) : "暂无";
+}
+
+function formatDistance(value: number | null | undefined) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return "暂无";
+  return `${Math.round(numeric).toLocaleString("zh-CN")} m`;
+}
+
+function formatPercent(value: number | null | undefined) {
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? `${Math.round(numeric * 100)}%` : "暂无";
+}
 
 export default function StreetPanel({ districts, selectedDistrict, onSelectDistrict }: StreetPanelProps) {
   const [streets, setStreets] = useState<StreetMetric[]>([]);
@@ -43,11 +60,14 @@ export default function StreetPanel({ districts, selectedDistrict, onSelectDistr
 
   const filtered = useMemo(() => {
     const keyword = query.trim();
-    return streets.filter((item) => {
-      const districtMatched = !selectedDistrict || item.district === selectedDistrict;
-      const keywordMatched = !keyword || item.street.includes(keyword) || item.district.includes(keyword);
-      return districtMatched && keywordMatched;
-    });
+    return streets
+      .filter((item) => {
+        const districtMatched = !selectedDistrict || item.district === selectedDistrict;
+        const keywordMatched = !keyword || item.street.includes(keyword) || item.district.includes(keyword);
+        const houseCountMatched = Number(item.house_count) >= STREET_RECOMMENDATION_MIN_HOUSE_COUNT;
+        return districtMatched && keywordMatched && houseCountMatched;
+      })
+      .sort((a, b) => (Number(b.calibrated_score_life_circle) || 0) - (Number(a.calibrated_score_life_circle) || 0));
   }, [query, selectedDistrict, streets]);
 
   const selectedStreet = useMemo(() => {
@@ -73,6 +93,9 @@ export default function StreetPanel({ districts, selectedDistrict, onSelectDistr
         </div>
         <Badge variant="outline" className="border-[#bfe6d6] bg-[#eefbf4] text-[#21745d]">
           {loading ? "加载中" : `${filtered.length} 个街道/镇`}
+        </Badge>
+        <Badge variant="outline" className="border-[#f3c99a] bg-[#fff4df] text-[#9a5a1d]">
+          推荐门槛 ≥50 房源
         </Badge>
       </div>
 
@@ -160,9 +183,12 @@ export default function StreetPanel({ districts, selectedDistrict, onSelectDistr
                   </span>
                   <span className="mt-1 block text-xs text-[#806653]">
                     {formatPrice(item.avg_price)} / POI {item.poi_total.toLocaleString("zh-CN")}
+                    {(item.sample_reliability_score ?? 1) < 1 ? " / 样本不足" : ""}
                   </span>
                 </span>
-                <Badge className="shrink-0 bg-[#33a985] text-white">{formatScore(item.livability_score)}</Badge>
+                <Badge className="shrink-0 bg-[#33a985] text-white">
+                  {formatOptionalScore(item.calibrated_score_life_circle)}
+                </Badge>
               </button>
             ))}
           </div>
@@ -175,22 +201,38 @@ export default function StreetPanel({ districts, selectedDistrict, onSelectDistr
                   <ChevronRight className="h-4 w-4 text-[#a58b76]" />
                   {selectedStreet.street}
                 </CardTitle>
-                <Badge className="bg-[#ff7a4f] text-white">评分 {formatScore(selectedStreet.livability_score)}</Badge>
+                <div className="flex flex-wrap gap-2">
+                  <Badge className="bg-[#33a985] text-white">
+                    校准评分 {formatOptionalScore(selectedStreet.calibrated_score_life_circle)}
+                  </Badge>
+                  <Badge variant="outline" className="border-[#d8ccff] bg-[#f4f0ff] text-[#6d4fc2]">
+                    生活圈 {formatOptionalScore(selectedStreet.life_circle_score)}
+                  </Badge>
+                  {(selectedStreet.sample_reliability_score ?? 1) < 1 ? (
+                    <Badge variant="outline" className="border-[#f3c99a] bg-[#fff4df] text-[#9a5a1d]">
+                      样本不足，评分已降权
+                    </Badge>
+                  ) : null}
+                </div>
               </CardHeader>
               <CardContent>
                 <div className="grid grid-cols-2 gap-3 text-sm md:grid-cols-3 xl:grid-cols-4">
-                  <StreetMetricCard label="平均房价" value={formatPrice(selectedStreet.avg_price)} />
-                  <StreetMetricCard label="平均总价" value={`${selectedStreet.avg_total_price.toFixed(1)} 万`} />
-                  <StreetMetricCard label="房源数量" value={selectedStreet.house_count.toLocaleString("zh-CN")} />
-                  <StreetMetricCard label="POI总数" value={selectedStreet.poi_total.toLocaleString("zh-CN")} />
-                  <StreetMetricCard label="购物" value={selectedStreet.shopping_count.toLocaleString("zh-CN")} />
-                  <StreetMetricCard label="交通" value={selectedStreet.traffic_count.toLocaleString("zh-CN")} />
-                  <StreetMetricCard label="医疗" value={selectedStreet.healthcare_count.toLocaleString("zh-CN")} />
-                  <StreetMetricCard label="休闲" value={selectedStreet.recreation_count.toLocaleString("zh-CN")} />
-                  <StreetMetricCard label="企业" value={selectedStreet.company_count.toLocaleString("zh-CN")} />
-                  <StreetMetricCard label="住宅" value={selectedStreet.residence_count.toLocaleString("zh-CN")} />
-                  <StreetMetricCard label="活跃度" value={selectedStreet.business_activity.toFixed(1)} />
-                  <StreetMetricCard label="房价标准化" value={formatScore(selectedStreet.price_norm)} />
+                  <StreetMetricCard label="校准评分" value={formatOptionalScore(selectedStreet.calibrated_score_life_circle)} />
+                  <StreetMetricCard label="生活圈总分" value={formatOptionalScore(selectedStreet.life_circle_score)} />
+                  <StreetMetricCard label="5分钟基础生活" value={formatOptionalScore(selectedStreet.life_circle_5min_score)} />
+                  <StreetMetricCard label="10分钟日常生活" value={formatOptionalScore(selectedStreet.life_circle_10min_score)} />
+                  <StreetMetricCard label="15分钟城市资源" value={formatOptionalScore(selectedStreet.life_circle_15min_score)} />
+                  <StreetMetricCard label="5分钟覆盖率" value={formatPercent(selectedStreet.life_circle_5min_coverage)} />
+                  <StreetMetricCard label="10分钟覆盖率" value={formatPercent(selectedStreet.life_circle_10min_coverage)} />
+                  <StreetMetricCard label="15分钟覆盖率" value={formatPercent(selectedStreet.life_circle_15min_coverage)} />
+                  <StreetMetricCard label="样本可信度" value={formatOptionalScore(selectedStreet.sample_reliability_score)} />
+                  <StreetMetricCard label="供需可达性" value={formatOptionalScore(selectedStreet.e2sfca_access_score)} />
+                  <StreetMetricCard label="房价负担分" value={formatOptionalScore(selectedStreet.affordability_score)} />
+                  <StreetMetricCard label="POI多样性" value={formatOptionalScore(selectedStreet.poi_diversity)} />
+                  <StreetMetricCard label="可达性分" value={formatOptionalScore(selectedStreet.access_score)} />
+                  <StreetMetricCard label="性价比分" value={formatOptionalScore(selectedStreet.value_score)} />
+                  <StreetMetricCard label="最近交通" value={formatDistance(selectedStreet.nearest_traffic_distance)} />
+                  <StreetMetricCard label="最近医疗" value={formatDistance(selectedStreet.nearest_healthcare_distance)} />
                 </div>
               </CardContent>
             </Card>
@@ -198,7 +240,7 @@ export default function StreetPanel({ districts, selectedDistrict, onSelectDistr
         </div>
       ) : (
         <div className="mt-5 rounded-xl border border-[#f1dfc9] bg-[#fffdf8]/80 p-5 text-sm text-[#806653]">
-          没有匹配到街道/镇数据。
+          当前筛选下没有达到推荐门槛的街道/镇。
         </div>
       )}
     </section>
