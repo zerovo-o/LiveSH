@@ -123,25 +123,3 @@ cd backend
 cd backend
 .venv/bin/python -m app.process_data --house-path ../data/derived/sh_house_dataset_anjuke_geocoded.parquet
 ```
-
-## 不建议上传 GitHub 的数据
-
-这些文件或目录体积大、可再生成，或者包含本地缓存，不建议直接提交：
-
-```text
-backend/livability.db
-data/sh_poi_raw/
-data/derived/
-datanew/
-archive-2/
-paper/
-```
-
-如果要让同学快速运行，推荐线下单独共享：
-
-```text
-data/sh_poi_raw/
-backend/livability.db
-```
-
-有了这两个，同学 clone 仓库后基本可以直接启动前后端；如果只共享 `data/sh_poi_raw/`，则需要在本地重新运行入库脚本生成数据库。
