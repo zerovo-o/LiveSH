@@ -176,3 +176,7 @@ data/sh_poi_raw/sh_traffic facility/
 archive-2/
 datanew/
 paper/
+
+# data files are transferred locally; keep docs only
+data/**
+!data/README.md
