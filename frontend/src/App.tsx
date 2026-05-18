@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { AlertCircle, ChevronsDown, MapPinned, RefreshCw, Sparkles } from "lucide-react";
-import AIAdvicePanel from "./components/AIAdvicePanel";
 import ChartsPanel from "./components/ChartsPanel";
 import MapPanel from "./components/MapPanel";
+import PersonalizedAgentPanel from "./components/PersonalizedAgentPanel";
 import StatsPanel from "./components/StatsPanel";
 import StreetPanel from "./components/StreetPanel";
 import { Button } from "./components/ui/button";
@@ -162,7 +162,7 @@ function App() {
           onSelectDistrict={setSelectedDistrict}
         />
 
-        <AIAdvicePanel selected={selected} />
+        <PersonalizedAgentPanel />
       </div>
       </div>
     </main>

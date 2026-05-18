@@ -8,7 +8,9 @@ from sqlalchemy.orm import Session
 from .ai_advice import generate_ai_advice
 from .amap import fetch_local_shanghai_street_boundaries, fetch_shanghai_district_boundaries
 from .database import Base, engine, get_db
+from .house_recommend_schemas import HouseRecommendRequest, HouseRecommendResponse
 from .models import DistrictMetric, PoiCategoryMetric, StreetMetric
+from .recommend_houses import recommend_houses
 from .schemas import AIAdviceOut, AIAdviceRequest, DistrictMetricOut, StreetMetricOut, SummaryOut
 
 Base.metadata.create_all(bind=engine)
@@ -104,6 +106,11 @@ def ai_advice(payload: AIAdviceRequest, db: Session = Depends(get_db)):
         "advice": advice,
         "is_placeholder": is_placeholder,
     }
+
+
+@app.post("/api/agent/recommend-houses", response_model=HouseRecommendResponse)
+def agent_recommend_houses(payload: HouseRecommendRequest, db: Session = Depends(get_db)):
+    return recommend_houses(payload, db)
 
 
 def main() -> None:
