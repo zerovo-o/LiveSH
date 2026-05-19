@@ -2,6 +2,7 @@ import { AlertCircle, RefreshCw } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import MapPanel from "./components/MapPanel";
 import PersonalizedAgentPanel from "./components/PersonalizedAgentPanel";
+import StatsPanel from "./components/StatsPanel";
 import StreetPanel from "./components/StreetPanel";
 import { Button } from "./components/ui/button";
 import type { Summary } from "./types/metrics";
@@ -88,8 +89,142 @@ function App() {
           </div>
           <PersonalizedAgentPanel />
         </section>
+    <main className="min-h-screen text-[#33251f]">
+      <section className="relative flex min-h-screen overflow-hidden px-4 py-12 md:px-8 md:py-16">
+        <div className="absolute right-[-8rem] top-[-9rem] h-80 w-80 rounded-full bg-[#ffb37d]/35 blur-3xl" />
+        <div className="absolute left-[-9rem] top-[12rem] h-80 w-80 rounded-full bg-[#6bd0b5]/18 blur-3xl" />
+
+        <div className="relative z-10 mx-auto flex w-full max-w-5xl flex-col justify-between text-center">
+          <div className="pt-4">
+            <h1 className="mx-auto max-w-5xl bg-[linear-gradient(105deg,#ff6b4a_0%,#ffb23f_34%,#20b486_66%,#2f80ed_100%)] bg-clip-text text-7xl font-black leading-none tracking-[-0.08em] text-transparent drop-shadow-[0_18px_36px_rgba(255,122,79,0.18)] md:text-9xl">
+              LiveSH
+            </h1>
+            <div className="mx-auto mt-3 h-2 w-40 rounded-full bg-[linear-gradient(90deg,#ff6b4a,#ffc85c,#28c19a,#5b8cff)] opacity-80" />
+            <div className="mt-8 inline-flex items-center gap-2 rounded-full bg-white/38 px-4 py-2 text-base font-medium text-[#9a5a1d] backdrop-blur-sm">
+                <Sparkles className="h-4 w-4" />
+                让地图先回答：哪里住得更划算，也更方便
+            </div>
+            <p className="mx-auto mt-7 max-w-3xl text-lg leading-8 text-[#6e5543]">
+              把二手房挂牌价格与购物、交通、医疗、休闲、企业等 POI 数据放到同一张城市空间底图上，
+              从区级、街镇级和房源点周边可达性三个层次观察“生活便利”与“居住成本”的相对关系
+            </p>
+          </div>
+
+          <div className="mx-auto max-w-3xl py-10">
+              <div className="mb-4 flex items-center justify-center gap-2 text-lg font-semibold text-[#33251f]">
+                <MapPinned className="h-5 w-5 text-[#ff7a4f]" />
+                打分逻辑
+              </div>
+              <div className="space-y-3 text-base leading-7 text-[#6e5543]">
+                <p>稳健评分综合服务供需比、POI 多样性与房价负担</p>
+                <p>供需可达性衡量设施供给覆盖周边居住需求的能力</p>
+                <p>校准评分作为默认推荐依据，并按样本可信度对排名降权</p>
+              </div>
+              <div className="mx-auto mt-8 flex max-w-2xl flex-wrap justify-center gap-4 text-2xl font-black md:text-4xl">
+                <div className="rounded-[1.35rem] bg-[#fff4df]/82 px-8 py-4 text-[#c06a1a] shadow-[0_14px_34px_rgba(192,106,26,0.12)]">成本</div>
+                <div className="rounded-[1.35rem] bg-[#e8f7ef]/82 px-8 py-4 text-[#23916f] shadow-[0_14px_34px_rgba(35,145,111,0.12)]">便利</div>
+                <div className="rounded-[1.35rem] bg-[#fff0ea]/82 px-8 py-4 text-[#d85435] shadow-[0_14px_34px_rgba(216,84,53,0.12)]">评分</div>
+              </div>
+          </div>
+
+          <button
+            type="button"
+            onClick={() => document.getElementById("map-gis")?.scrollIntoView({ behavior: "smooth", block: "start" })}
+            className="mx-auto -mt-6 flex h-20 w-28 items-center justify-center text-[#b25332] transition hover:translate-y-1 hover:text-[#ff7a4f]"
+            aria-label="进入地图 GIS"
+          >
+            <ChevronsDown className="h-16 w-16 stroke-[2.8]" />
+          </button>
+        </div>
+      </section>
+
+      <div className="mx-auto max-w-[1440px] px-4 pb-6 pt-4 md:px-8 xl:px-10">
+      <section id="map-gis" className="mx-auto grid h-[calc(100vh-4rem)] min-h-[560px] max-w-[1360px] scroll-mt-5 grid-cols-1 gap-3 rounded-[22px] border border-[#ead8c2] bg-white/70 p-3 shadow-[0_24px_80px_rgba(104,72,42,0.12)] xl:grid-cols-[320px_minmax(0,1fr)]">
+        <RecommendationSection
+          recommendations={summary.recommendations}
+          onSelectDistrict={setSelectedDistrict}
+          compact
+        />
+        <div className="min-h-0">
+          <MapPanel
+            districts={summary.districts}
+            selectedDistrict={selectedDistrict}
+            recommendations={summary.recommendations}
+            onSelectDistrict={setSelectedDistrict}
+          />
+        </div>
+      </section>
+
+      <div className="mt-5 space-y-5">
+        <StatsPanel
+          selected={selected}
+          districts={summary.score_ranking}
+          onSelectDistrict={setSelectedDistrict}
+        />
+
+        <StreetPanel
+          districts={summary.score_ranking}
+          selectedDistrict={selectedDistrict}
+          onSelectDistrict={setSelectedDistrict}
+        />
+
+        <ChartsPanel
+          priceTop10={summary.price_top10}
+          poiCategories={summary.poi_categories}
+          shoppingTop5={summary.shopping_top5}
+          scatter={summary.scatter}
+          scoreRanking={summary.score_ranking}
+          selectedDistrict={selectedDistrict}
+          onSelectDistrict={setSelectedDistrict}
+        />
+
+        <AIAdvicePanel selected={selected} />
+      </div>
       </div>
     </main>
+  );
+}
+
+function RecommendationSection({
+  recommendations,
+  onSelectDistrict,
+  compact = false
+}: {
+  recommendations: DistrictMetric[];
+  onSelectDistrict: (district: string) => void;
+  compact?: boolean;
+}) {
+  return (
+    <section className="flex min-h-0 flex-col rounded-[18px] border border-[#ead8c2] bg-[#fffaf1]/92 p-4 shadow-[0_18px_56px_rgba(104,72,42,0.10)]">
+      <div className="flex items-center justify-between">
+        <h2 className="text-lg font-semibold text-[#33251f]">推荐区域 Top5</h2>
+        <Badge variant="outline" className="border-[#bfe6d6] bg-[#eefbf4] text-[#21745d]">校准评分排序</Badge>
+      </div>
+      <div className={`mt-4 min-h-0 gap-3 ${compact ? "flex flex-1 flex-col overflow-y-auto pr-1" : "grid grid-cols-1 md:grid-cols-2 xl:grid-cols-5"}`}>
+        {recommendations.map((item, index) => (
+          <Card
+            key={item.district}
+            className="cursor-pointer border-[#f1dfc9] bg-[#fffdf8] shadow-none transition hover:border-[#f3c99a] hover:bg-[#fff9ef]"
+            onClick={() => onSelectDistrict(item.district)}
+          >
+            <CardHeader>
+              <CardTitle className="flex items-center justify-between gap-2">
+                <span>
+                  {index + 1}. {item.district}
+                </span>
+                <Badge className="shrink-0 bg-[#33a985] text-white">评分 {formatScore(item.calibrated_score_life_circle)}</Badge>
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="flex items-center justify-between text-sm text-[#775f4d]">
+                <span>平均房价</span>
+                <span className="font-medium text-[#33251f]">{formatPrice(item.avg_price)}</span>
+              </div>
+            </CardContent>
+          </Card>
+        ))}
+      </div>
+    </section>
   );
 }
 

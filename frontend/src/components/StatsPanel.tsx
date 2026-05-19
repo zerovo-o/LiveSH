@@ -49,7 +49,7 @@ export default function StatsPanel({ selected, districts, onSelectDistrict }: St
       <Card className="mt-4 border-[#f1dfc9] bg-[#fffdf8]/82 shadow-none">
         <CardHeader>
           <CardTitle className="text-[#33251f]">{isAll ? "全市汇总" : `${active.district} 区域详情`}</CardTitle>
-          <Badge className="bg-[#ff7a4f] text-white">{isAll ? "全部" : `评分 ${formatScore(active.livability_score)}`}</Badge>
+          <Badge className="bg-[#33a985] text-white">{isAll ? "全部" : `评分 ${formatScore(active.calibrated_score_life_circle)}`}</Badge>
         </CardHeader>
         <CardContent>
           <div className="grid grid-cols-2 gap-3 text-sm md:grid-cols-3 xl:grid-cols-4">
@@ -64,7 +64,9 @@ export default function StatsPanel({ selected, districts, onSelectDistrict }: St
             <Metric label="企业" value={active.company_count.toLocaleString("zh-CN")} icon={<Factory className="h-4 w-4" />} />
             <Metric label="住宅" value={active.residence_count.toLocaleString("zh-CN")} icon={<Building2 className="h-4 w-4" />} />
             <Metric label="活跃度" value={active.business_activity.toFixed(1)} icon={<MapPinned className="h-4 w-4" />} />
-            <Metric label={isAll ? "平均评分" : "宜居评分"} value={formatScore(active.livability_score)} icon={<MapPinned className="h-4 w-4" />} />
+            <Metric label={isAll ? "平均校准评分" : "校准评分"} value={formatScore(active.calibrated_score_life_circle)} icon={<MapPinned className="h-4 w-4" />} />
+            <Metric label={isAll ? "平均供需可达性" : "供需可达性"} value={formatScore(active.e2sfca_access_score)} icon={<MapPinned className="h-4 w-4" />} />
+            <Metric label="样本可信度" value={formatScore(active.sample_reliability_score)} icon={<Building2 className="h-4 w-4" />} />
             {!isAll ? (
               <>
                 <Metric label="房价标准化" value={formatScore(active.price_norm)} icon={<BarChart3 className="h-4 w-4" />} />
@@ -97,8 +99,10 @@ function buildCitySummary(districts: DistrictMetric[]): DistrictMetric {
     houseCount
       ? districts.reduce((sum, item) => sum + item[field] * item.house_count, 0) / houseCount
       : 0;
-  const average = (field: "livability_score" | "business_activity" | "price_norm" | "activity_norm") =>
-    districts.length ? districts.reduce((sum, item) => sum + item[field], 0) / districts.length : 0;
+  const average = (field: keyof DistrictMetric) => {
+    const values = districts.map((item) => Number(item[field])).filter((value) => Number.isFinite(value));
+    return values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : 0;
+  };
 
   return {
     district: "全部区域",
@@ -116,6 +120,43 @@ function buildCitySummary(districts: DistrictMetric[]): DistrictMetric {
     activity_norm: average("activity_norm"),
     price_norm: average("price_norm"),
     livability_score: average("livability_score"),
+    poi_diversity: average("poi_diversity"),
+    shopping_per_house: average("shopping_per_house"),
+    traffic_per_house: average("traffic_per_house"),
+    healthcare_per_house: average("healthcare_per_house"),
+    recreation_per_house: average("recreation_per_house"),
+    company_per_house: average("company_per_house"),
+    cost_pressure: average("cost_pressure"),
+    affordability_score: average("affordability_score"),
+    service_score: average("service_score"),
+    vitality_score: average("vitality_score"),
+    livability_score_v2: average("livability_score_v2"),
+    shopping_access: average("shopping_access"),
+    traffic_access: average("traffic_access"),
+    healthcare_access: average("healthcare_access"),
+    recreation_access: average("recreation_access"),
+    company_access: average("company_access"),
+    nearest_traffic_distance: average("nearest_traffic_distance"),
+    nearest_healthcare_distance: average("nearest_healthcare_distance"),
+    access_score: average("access_score"),
+    value_score: average("value_score"),
+    shopping_e2sfca_access: average("shopping_e2sfca_access"),
+    traffic_e2sfca_access: average("traffic_e2sfca_access"),
+    healthcare_e2sfca_access: average("healthcare_e2sfca_access"),
+    recreation_e2sfca_access: average("recreation_e2sfca_access"),
+    company_e2sfca_access: average("company_e2sfca_access"),
+    e2sfca_access_score: average("e2sfca_access_score"),
+    e2sfca_value_score: average("e2sfca_value_score"),
+    sample_reliability_score: average("sample_reliability_score"),
+    calibrated_score: average("calibrated_score"),
+    life_circle_5min_score: average("life_circle_5min_score"),
+    life_circle_10min_score: average("life_circle_10min_score"),
+    life_circle_15min_score: average("life_circle_15min_score"),
+    life_circle_score: average("life_circle_score"),
+    life_circle_5min_coverage: average("life_circle_5min_coverage"),
+    life_circle_10min_coverage: average("life_circle_10min_coverage"),
+    life_circle_15min_coverage: average("life_circle_15min_coverage"),
+    calibrated_score_life_circle: average("calibrated_score_life_circle"),
     center_lng: null,
     center_lat: null
   };

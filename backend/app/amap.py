@@ -9,6 +9,8 @@ import shapefile
 from fastapi import HTTPException
 
 from .config import AMAP_WEB_SERVICE_KEY, DATA_DIR
+from .config import DATA_DIR
+from .config import AMAP_WEB_SERVICE_KEY
 from .geo import normalize_district, wgs84_to_gcj02
 
 AMAP_DISTRICT_URL = "https://restapi.amap.com/v3/config/district"

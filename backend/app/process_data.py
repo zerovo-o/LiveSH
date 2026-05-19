@@ -13,11 +13,13 @@ from .database import Base, SessionLocal, engine
 from .geo import normalize_district, wgs84_to_gcj02
 from .metrics import (
     add_phase1_scores,
+    attach_life_circle_scores,
     attach_phase2_scores,
     attach_phase4_scores,
     build_demand_points,
     compute_e2sfca_house_features,
     compute_house_features,
+    compute_life_circle_house_features,
 )
 from .models import DistrictMetric, HouseListing, PoiCategoryMetric, PoiPoint, StreetMetric
 from .poi_taxonomy import add_poi_classification_columns, build_poi_subtype_audit
@@ -163,22 +165,25 @@ def load_standard_house_rows(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def load_legacy_house_rows(df: pd.DataFrame) -> pd.DataFrame:
-    cols = [
-        "house_id",
-        "district",
-        "sub_district",
-        "community_name",
-        "title",
-        "area",
-        "listing_total_price",
-        "listing_unit_price",
-        "longitude",
-        "latitude",
-    ]
-    missing = set(["house_id", "district", "listing_total_price", "listing_unit_price", "longitude", "latitude"]) - set(df.columns)
-    if missing:
-        raise ValueError(f"house data missing required columns: {sorted(missing)}")
-    cols = [c for c in cols if c in df.columns]
+
+cols = [
+    "house_id",
+    "district",
+    "sub_district",
+    "community_name",
+    "title",
+    "area",
+    "listing_total_price",
+    "listing_unit_price",
+    "longitude",
+    "latitude",
+]
+required = {"house_id", "district", "listing_total_price", "listing_unit_price", "longitude", "latitude"}
+missing = required - set(df.columns)
+if missing:
+    raise ValueError(f"house data missing required columns: {sorted(missing)}")
+cols = [c for c in cols if c in df.columns]
+
     result = df[cols].rename(
         columns={
             "listing_total_price": "price",
@@ -376,14 +381,14 @@ def ingest(data_dir: Path = DATA_DIR, house_path: Path | None = None) -> None:
     house_features = compute_house_features(houses, pois)
     demand_points = build_demand_points(houses, pois)
     phase4_house_features = compute_e2sfca_house_features(house_features, demand_points, pois)
-
+    life_circle_house_features = compute_life_circle_house_features(houses, pois)
     derived_dir = data_dir / "derived"
     derived_dir.mkdir(parents=True, exist_ok=True)
     house_features.to_parquet(derived_dir / "house_features_current.parquet", index=False)
     demand_points.to_parquet(derived_dir / "demand_points_current.parquet", index=False)
     phase4_house_features.to_parquet(derived_dir / "house_features_phase4_current.parquet", index=False)
+    life_circle_house_features.to_parquet(derived_dir / "house_life_circle_features_current.parquet", index=False)
     build_poi_subtype_audit(pois).to_csv(derived_dir / "poi_subtype_audit.csv", index=False)
-
     metrics = attach_phase2_scores(metrics, house_features, ["district"])
     street_metrics = attach_phase2_scores(street_metrics, house_features, ["district", "street"])
     metrics = attach_phase4_scores(metrics, phase4_house_features, ["district"], reliability_house_threshold=50)
@@ -393,6 +398,21 @@ def ingest(data_dir: Path = DATA_DIR, house_path: Path | None = None) -> None:
         ["district", "street"],
         reliability_house_threshold=10,
     )
+    metrics = attach_life_circle_scores(metrics, life_circle_house_features, ["district"])
+    street_metrics = attach_life_circle_scores(street_metrics, life_circle_house_features, ["district", "street"])
+    street_metrics[
+        [
+            "district",
+            "street",
+            "house_count",
+            "calibrated_score",
+            "calibrated_score_life_circle",
+            "life_circle_score",
+            "life_circle_5min_score",
+            "life_circle_10min_score",
+            "life_circle_15min_score",
+        ]
+    ].to_csv(derived_dir / "life_circle_street_comparison.csv", index=False)
 
     with SessionLocal.begin() as db:
         for table in [HouseListing, PoiPoint, DistrictMetric, StreetMetric, PoiCategoryMetric]:

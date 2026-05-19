@@ -168,4 +168,11 @@ data/sh_poi_raw/sh_recreation/
 data/sh_poi_raw/sh_residence/
 data/sh_poi_raw/sh_shopping/
 data/sh_poi_raw/sh_traffic facility/
-data/.tmp/
+
+# Python packaging artifacts
+*.egg-info/
+
+# local data and papers
+archive-2/
+datanew/
+paper/

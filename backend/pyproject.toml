@@ -14,12 +14,13 @@ dependencies = [
   "pyarrow>=14",
   "pyproj>=3.6",
   "pyshp>=3.0",
-  "scipy>=1.10",
+  "scipy>=1.11",
   "sqlalchemy>=2.0",
   "python-dotenv>=0.21",
 ]
 
 [project.optional-dependencies]
+dev = ["pytest>=8"]
 postgres = ["psycopg2-binary>=2.9"]
 
 [project.scripts]
