@@ -40,27 +40,6 @@ class StreetRecommendation(BaseModel):
     reason: str
     risks: list[str]
 
-
-class HouseRecommendation(BaseModel):
-    house_id: str
-    district: str
-    sub_district: str
-    community_name: str | None = None
-    title: str | None = None
-    area: float | None = None
-    commute_minutes: float | None = None
-    unit_price: float
-    total_price: float
-    score: float
-    rule_score: float
-    llm_score: float | None = None
-    llm_confidence: float | None = None
-    community_score: float | None = None
-    score_breakdown: dict[str, float] | None = None
-    reason: str
-    risks: list[str]
-
-
 class CommunityRecommendation(BaseModel):
     district: str
     sub_district: str
@@ -73,6 +52,7 @@ class CommunityRecommendation(BaseModel):
     avg_unit_price: float
     avg_total_price: float
     house_count: int
+    house_ids: list[str] = Field(default_factory=list)
     poi_score: float
     traffic_score: float
     budget_match_score: float
@@ -85,5 +65,4 @@ class HouseRecommendResponse(BaseModel):
     work_location: str | None = None
     streets: list[StreetRecommendation]
     communities: list[CommunityRecommendation]
-    houses: list[HouseRecommendation]
     summary: dict[str, float | int | str | bool | None]

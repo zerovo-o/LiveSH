@@ -12,7 +12,6 @@ from .house_recommend_schemas import (
     CommunityRecommendation,
     HouseRecommendRequest,
     HouseRecommendResponse,
-    HouseRecommendation,
     StreetRecommendation,
 )
 from .llm_rerank import rerank_community_candidates, rerank_house_candidates
@@ -94,6 +93,17 @@ def _normalize_tuple(values: dict[tuple[str, str], float]) -> dict[tuple[str, st
     return {k: _clamp((v - lo) / (hi - lo)) for k, v in values.items()}
 
 
+def _float_attr(row: object, *names: str, default: float = 0.0) -> float:
+    for name in names:
+        value = getattr(row, name, None)
+        if value is not None:
+            try:
+                return float(value)
+            except (TypeError, ValueError):
+                continue
+    return default
+
+
 def _resolve_version() -> str:
     v = (RECOMMENDER_VERSION or "v3").lower()
     return v if v in {"v1", "v2", "v3"} else "v3"
@@ -167,15 +177,18 @@ def _build_metric_maps(
     districts = db.scalars(select(DistrictMetric)).all()
     streets = db.scalars(select(StreetMetric)).all()
 
-    convenience_raw = {row.district: float(row.livability_score_v2) for row in districts}
+    convenience_raw = {row.district: _float_attr(row, "livability_score_v2", "livability_score") for row in districts}
     poi_pref_raw = {
         row.district: float(row.healthcare_count) * healthcare_weight + float(row.shopping_count) * shopping_weight
         for row in districts
     }
-    access_raw = {row.district: float(row.access_score) for row in districts}
-    e2sfca_raw = {row.district: float(row.e2sfca_access_score) for row in districts}
-    calibrated_raw = {row.district: float(row.calibrated_score_life_circle) for row in districts}
-    street_calibrated_raw = {(row.district, row.street): float(row.calibrated_score_life_circle) for row in streets}
+    access_raw = {row.district: _float_attr(row, "access_score") for row in districts}
+    e2sfca_raw = {row.district: _float_attr(row, "e2sfca_access_score") for row in districts}
+    calibrated_raw = {row.district: _float_attr(row, "calibrated_score_life_circle", "calibrated_score") for row in districts}
+    street_calibrated_raw = {
+        (row.district, row.street): _float_attr(row, "calibrated_score_life_circle", "calibrated_score")
+        for row in streets
+    }
 
     return (
         _normalize(convenience_raw),
@@ -630,43 +643,17 @@ def recommend_houses(payload: HouseRecommendRequest, db: Session) -> HouseRecomm
             )
         )
 
-    house_rows_out: list[HouseRecommendation] = []
+    house_ids_by_community: dict[str, list[str]] = {item.community_id: [] for item in top_communities}
     for item in sorted(candidates, key=lambda x: x.final_score, reverse=True):
         community_id = f"{item.district}|{item.sub_district}|{item.community_name}"
         if community_id not in allowed_communities:
             continue
-        existing_count = sum(
-            1
-            for row in house_rows_out
-            if row.district == item.district and row.sub_district == item.sub_district and row.community_name == item.community_name
-        )
+        existing_count = len(house_ids_by_community.get(community_id, []))
         if existing_count >= payload.top_houses_per_community:
             continue
+        house_ids_by_community[community_id].append(str(item.model.house_id or item.model.id))
 
-        house_rows_out.append(
-            HouseRecommendation(
-                house_id=str(item.model.house_id or item.model.id),
-                district=item.district,
-                sub_district=item.sub_district,
-                community_name=item.community_name,
-                title=item.title,
-                area=item.area,
-                commute_minutes=item.commute_minutes,
-                unit_price=float(item.model.unit_price),
-                total_price=float(item.model.price),
-                score=round(item.final_score, 4),
-                rule_score=round(item.rule_score, 4),
-                llm_score=round(item.llm_score, 4) if item.llm_score is not None else None,
-                llm_confidence=round(item.llm_confidence, 4) if item.llm_confidence is not None else None,
-                community_score=next((round(c.final_score, 4) for c in top_communities if c.community_id == community_id), None),
-                score_breakdown=item.breakdown,
-                reason=item.llm_reason or "Balanced by budget, commute, and service access.",
-                risks=[
-                    "This is a model recommendation and not a transaction guarantee.",
-                    "Commute value may vary by time and route.",
-                ],
-            )
-        )
+    community_house_ids = {item.community_id: house_ids_by_community.get(item.community_id, []) for item in top_communities}
 
     summary: dict[str, float | int | str | bool | None] = {
         "feature_version_used": version,
@@ -676,7 +663,7 @@ def recommend_houses(payload: HouseRecommendRequest, db: Session) -> HouseRecomm
         "affordable_unit_price": round(affordable_unit_price, 2),
         "top_street_count": len(top_streets),
         "top_community_count": len(top_communities),
-        "returned_houses": len(house_rows_out),
+        "returned_houses": sum(len(ids) for ids in community_house_ids.values()),
         "house_rerank_applied": house_rerank_diag["house_rerank_applied"],
         "house_rerank_candidates": house_rerank_diag["house_rerank_candidates"],
         "house_rerank_success_count": house_rerank_diag["house_rerank_success_count"],
@@ -704,7 +691,9 @@ def recommend_houses(payload: HouseRecommendRequest, db: Session) -> HouseRecomm
     return HouseRecommendResponse(
         work_location=work_location_str,
         streets=top_streets,
-        communities=community_rows,
-        houses=house_rows_out,
+        communities=[
+            community.model_copy(update={"house_ids": community_house_ids.get(f"{community.district}|{community.sub_district}|{community.community_name}", [])})
+            for community in community_rows
+        ],
         summary=summary,
     )

@@ -68,7 +68,6 @@ def summary(db: Session = Depends(get_db)):
     price_top10 = sorted(districts, key=lambda x: x.avg_price, reverse=True)[:10]
     shopping_top5 = sorted(districts, key=lambda x: x.shopping_count, reverse=True)[:5]
     score_ranking = sorted(districts, key=lambda x: x.calibrated_score_life_circle, reverse=True)
-    recommendations = [item for item in score_ranking if item.house_count >= 50]
     return {
         "districts": districts,
         "poi_categories": categories,
@@ -76,7 +75,7 @@ def summary(db: Session = Depends(get_db)):
         "shopping_top5": shopping_top5,
         "score_ranking": score_ranking,
         "scatter": districts,
-        "recommendations": recommendations[:5],
+        "recommendations": [item for item in score_ranking if item.house_count >= 50][:5],
     }
 
 

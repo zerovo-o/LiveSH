@@ -41,15 +41,6 @@ POI 总数：{metric.poi_total}
 
 def generate_ai_advice(metric: DistrictMetric) -> tuple[str, str, bool]:
     prompt = build_livability_prompt(metric)
-
-    # TODO: 组员在这里接入真实大模型 API。
-    # 建议做法：
-    # 1. 在 backend/.env 中增加 LLM_API_KEY、LLM_BASE_URL、LLM_MODEL 等配置。
-    # 2. 在 backend/app/config.py 中读取这些配置。
-    # 3. 在这里调用大模型接口，将 prompt 传入模型。
-    # 4. 返回模型生成的 advice，并把 is_placeholder 改为 False。
-    #
-    # 当前先返回规则占位结果，保证前端模块和接口已经可运行。
     advice = build_placeholder_advice(metric)
     return prompt, advice, True
 

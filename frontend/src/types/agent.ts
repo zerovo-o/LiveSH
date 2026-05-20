@@ -31,26 +31,6 @@ export type StreetRecommendation = {
   risks: string[];
 };
 
-export type HouseRecommendation = {
-  house_id: string;
-  district: string;
-  sub_district: string;
-  community_name: string | null;
-  title: string | null;
-  area: number | null;
-  commute_minutes: number | null;
-  unit_price: number;
-  total_price: number;
-  score: number;
-  rule_score: number;
-  llm_score?: number | null;
-  llm_confidence?: number | null;
-  community_score?: number | null;
-  score_breakdown?: Record<string, number> | null;
-  reason: string;
-  risks: string[];
-};
-
 export type CommunityRecommendation = {
   district: string;
   sub_district: string;
@@ -63,6 +43,7 @@ export type CommunityRecommendation = {
   avg_unit_price: number;
   avg_total_price: number;
   house_count: number;
+  house_ids: string[];
   poi_score: number;
   traffic_score: number;
   budget_match_score: number;
@@ -75,6 +56,5 @@ export type HouseRecommendResponse = {
   work_location: string | null;
   streets: StreetRecommendation[];
   communities: CommunityRecommendation[];
-  houses: HouseRecommendation[];
   summary: Record<string, number | string | boolean | null>;
 };
