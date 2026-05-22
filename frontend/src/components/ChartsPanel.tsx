@@ -435,6 +435,162 @@ const ChartsPanel = memo(function ChartsPanel({
     };
   }, [scatter, selectedDistrict]);
 
+  const perHouseOption = useMemo<EChartsOption>(() => {
+    const rows = [...scoreRanking].slice(0, 8);
+    const fields = [
+      { key: "shopping_per_house" as const, label: "购物/套", color: palette.primary },
+      { key: "traffic_per_house" as const, label: "交通/套", color: palette.blue },
+      { key: "healthcare_per_house" as const, label: "医疗/套", color: palette.accent }
+    ];
+    return {
+      grid: { top: 38, left: 54, right: 18, bottom: 50 },
+      tooltip: { trigger: "axis", axisPointer: { type: "shadow" } },
+      legend: { top: 0, textStyle: axisText },
+      xAxis: { type: "category", data: rows.map((d) => d.district), axisLabel: { ...axisText, rotate: 28 } },
+      yAxis: { type: "value", axisLabel: axisText },
+      series: fields.map((field) => ({
+        name: field.label,
+        type: "bar",
+        barMaxWidth: 16,
+        emphasis: { focus: "series" },
+        itemStyle: { color: field.color },
+        data: rows.map((d) => ({ name: d.district, value: Number(Number(d[field.key]).toFixed(4)) }))
+      }))
+    };
+  }, [scoreRanking]);
+
+  const accessValueOption = useMemo<EChartsOption>(() => {
+    return {
+      grid: { top: 24, left: 58, right: 22, bottom: 46 },
+      tooltip: {
+        formatter: (params: any) => {
+          const data = params.data as { name: string; value: number[] };
+          return `${data.name}<br/>房价 ${Math.round(data.value[0]).toLocaleString("zh-CN")} 元/㎡<br/>供需可达性 ${data.value[1].toFixed(3)}<br/>校准评分 ${data.value[2].toFixed(3)}`;
+        }
+      },
+      xAxis: { type: "value", name: "平均房价 (元/㎡)", nameTextStyle: axisText, axisLabel: axisText },
+      yAxis: { type: "value", name: "供需可达性分", nameTextStyle: axisText, axisLabel: axisText },
+      series: [
+        {
+          type: "scatter",
+          symbolSize: (value: number[]) => Math.max(10, Math.min(32, (value[2] + 0.5) * 28)),
+          data: scatter.map((d) => ({
+            name: d.district,
+            value: [d.avg_price, d.e2sfca_access_score, d.calibrated_score_life_circle],
+            itemStyle: { color: d.district === selectedDistrict ? selectedColor : scoreColor(d.calibrated_score_life_circle) }
+          }))
+        }
+      ]
+    };
+  }, [scatter, selectedDistrict]);
+
+  const scoreModelCompareOption = useMemo<EChartsOption>(() => {
+    const city = buildAverageMetric(scatter);
+    const selected = selectedMetric ?? city;
+    const fields = [
+      { key: "livability_score" as const, label: "宜居分v1" },
+      { key: "livability_score_v2" as const, label: "宜居分v2" },
+      { key: "calibrated_score" as const, label: "校准分" },
+      { key: "calibrated_score_life_circle" as const, label: "校准+生活圈" }
+    ];
+    return {
+      grid: { top: 38, left: 50, right: 18, bottom: 46 },
+      tooltip: { trigger: "axis" },
+      legend: { top: 0, textStyle: axisText },
+      xAxis: { type: "category", data: fields.map((f) => f.label), axisLabel: axisText },
+      yAxis: { type: "value", axisLabel: axisText },
+      series: [
+        { name: selected.district, type: "bar", barMaxWidth: 20, data: fields.map((f) => Number(Number(selected[f.key]).toFixed(4))), itemStyle: { color: palette.primary } },
+        { name: "全市均值", type: "bar", barMaxWidth: 20, data: fields.map((f) => Number(Number(city[f.key]).toFixed(4))), itemStyle: { color: "#d8c4aa" } }
+      ]
+    };
+  }, [scatter, selectedMetric]);
+
+  const lifeCircleCompareOption = useMemo<EChartsOption>(() => {
+    const city = buildAverageMetric(scatter);
+    const selected = selectedMetric ?? city;
+    const fields = [
+      { key: "life_circle_5min_coverage" as const, label: "5分钟生活圈" },
+      { key: "life_circle_10min_coverage" as const, label: "10分钟生活圈" },
+      { key: "life_circle_15min_coverage" as const, label: "15分钟生活圈" }
+    ];
+    return {
+      grid: { top: 38, left: 46, right: 18, bottom: 46 },
+      tooltip: { trigger: "axis" },
+      legend: { top: 0, textStyle: axisText },
+      xAxis: { type: "category", data: fields.map((f) => f.label), axisLabel: axisText },
+      yAxis: { type: "value", axisLabel: axisText, name: "覆盖率", nameTextStyle: axisText },
+      series: [
+        { name: selected.district, type: "bar", barMaxWidth: 22, data: fields.map((f) => Number(Number(selected[f.key]).toFixed(3))), itemStyle: { color: palette.primary } },
+        { name: "全市均值", type: "bar", barMaxWidth: 22, data: fields.map((f) => Number(Number(city[f.key]).toFixed(3))), itemStyle: { color: "#d8c4aa" } }
+      ]
+    };
+  }, [scatter, selectedMetric]);
+
+  const scoreComponentOption = useMemo<EChartsOption>(() => {
+    const city = buildAverageMetric(scatter);
+    const selected = selectedMetric ?? city;
+    const fields = [
+      { key: "affordability_score" as const, label: "负担力" },
+      { key: "service_score" as const, label: "服务强度" },
+      { key: "vitality_score" as const, label: "区域活力" },
+      { key: "life_circle_score" as const, label: "生活圈" },
+      { key: "e2sfca_access_score" as const, label: "供需可达" }
+    ];
+    const selectedValues = fields.map((f) => Number(Number(selected[f.key]).toFixed(4)));
+    const cityValues = fields.map((f) => Number(Number(city[f.key]).toFixed(4)));
+    return {
+      color: [palette.primary, palette.accent],
+      tooltip: { trigger: "item" },
+      legend: { bottom: 0, data: [selected.district, "全市均值"], textStyle: axisText },
+      radar: {
+        radius: "62%",
+        center: ["50%", "44%"],
+        indicator: fields.map((f) => ({ name: f.label, max: 1 })),
+        axisName: { color: "#6f5a4c", fontSize: 11 },
+        splitLine: { lineStyle: { color: "#ead8c2" } },
+        splitArea: { areaStyle: { color: ["rgba(255,248,235,0.65)", "rgba(236,248,240,0.45)"] } }
+      },
+      series: [
+        {
+          type: "radar",
+          data: [
+            { name: selected.district, value: selectedValues },
+            { name: "全市均值", value: cityValues }
+          ],
+          areaStyle: { opacity: 0.18 },
+          emphasis: { focus: "series" }
+        }
+      ]
+    };
+  }, [scatter, selectedMetric]);
+
+  const sampleReliabilityOption = useMemo<EChartsOption>(() => {
+    const valid = scatter.filter((d) => d.house_count > 0);
+    return {
+      grid: { top: 24, left: 58, right: 22, bottom: 46 },
+      tooltip: {
+        formatter: (params: any) => {
+          const data = params.data as { name: string; value: number[] };
+          return `${data.name}<br/>样本量 ${Math.round(data.value[0])} 套<br/>可靠性 ${data.value[1].toFixed(3)}<br/>校准评分 ${data.value[2].toFixed(3)}`;
+        }
+      },
+      xAxis: { type: "value", name: "挂牌样本量 (套)", nameTextStyle: axisText, axisLabel: axisText },
+      yAxis: { type: "value", name: "样本可靠性评分", nameTextStyle: axisText, axisLabel: axisText, min: 0, max: 1 },
+      series: [
+        {
+          type: "scatter",
+          symbolSize: (value: number[]) => Math.max(8, Math.min(28, Math.sqrt(value[0]) / 4)),
+          data: valid.map((d) => ({
+            name: d.district,
+            value: [d.house_count, d.sample_reliability_score, d.calibrated_score_life_circle],
+            itemStyle: { color: d.district === selectedDistrict ? selectedColor : scoreColor(d.calibrated_score_life_circle) }
+          }))
+        }
+      ]
+    };
+  }, [scatter, selectedDistrict]);
+
   return (
     <section className="rounded-[24px] border border-[#ead8c2] bg-[#fff8ea]/88 p-5 shadow-[0_18px_56px_rgba(104,72,42,0.10)] backdrop-blur">
       <div>
@@ -500,8 +656,8 @@ const ChartsPanel = memo(function ChartsPanel({
 
           {activeModule === "relation" ? (
             <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
-              <ChartCard title="房价与便利性象限" desc="按房价与商圈活跃度分象限，支持点击点位联动地图。">
-                <EChart option={quadrantOption} className="h-80 w-full" onClick={handleChartClick} />
+              <ChartCard title="可达性与房价性价比" desc="供需可达性分与房价的关系，气泡大小反映校准评分。">
+                <EChart option={accessValueOption} className="h-80 w-full" onClick={handleChartClick} />
               </ChartCard>
               <ChartCard title="指标相关性热力图" desc="展示指标间 Pearson 相关系数，颜色越暖相关越强。">
                 <EChart option={correlationOption} className="h-80 w-full" />
@@ -509,25 +665,25 @@ const ChartsPanel = memo(function ChartsPanel({
               <ChartCard title="多指标平行坐标" desc="展示多维指标分布，点击线条可联动选中区域。">
                 <EChart option={parallelOption} className="h-72 w-full" onClick={handleChartClick} />
               </ChartCard>
-              <ChartCard title="房价 Top10 区域" desc="展示各区挂牌均价前 10，点击柱状或区名联动地图。">
-                <EChart option={priceOption} className="h-72 w-full" onClick={handleChartClick} />
+              <ChartCard title="人均设施供给强度" desc="每套房的购物/交通/医疗 POI 供给数，反映设施密度。">
+                <EChart option={perHouseOption} className="h-72 w-full" onClick={handleChartClick} />
               </ChartCard>
             </div>
           ) : null}
 
           {activeModule === "model" ? (
             <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
-              <ChartCard title="选中区域 vs 全市均值" desc="雷达对比选中区域与全市均值各项标准化指标。">
-                <EChart option={radarOption} className="h-80 w-full" />
+              <ChartCard title="评分体系迭代对比" desc="对比不同阶段评分模型在选中区域的表现差异。">
+                <EChart option={scoreModelCompareOption} className="h-80 w-full" />
               </ChartCard>
-              <ChartCard title="校准评分区间分布" desc="展示区域评分分布，帮助识别高/低分簇群。">
-                <EChart option={scoreHistogramOption} className="h-80 w-full" />
+              <ChartCard title="生活圈覆盖率对比" desc="5/10/15分钟生活圈覆盖率，对比选中区域与全市均值。">
+                <EChart option={lifeCircleCompareOption} className="h-80 w-full" />
               </ChartCard>
-              <ChartCard title="校准评分排名" desc="按综合校准评分排序，支持点击选中区域联动。">
-                <EChart option={scoreOption} className="h-[28rem] w-full" onClick={handleChartClick} />
+              <ChartCard title="样本量与评分可靠性" desc="挂牌样本量与可靠性评分的关系，气泡大小反映校准评分。">
+                <EChart option={sampleReliabilityOption} className="h-[28rem] w-full" onClick={handleChartClick} />
               </ChartCard>
-              <ChartCard title="指标相关性热力图" desc="展示指标间 Pearson 相关系数，颜色越暖相关越强。">
-                <EChart option={correlationOption} className="h-[28rem] w-full" />
+              <ChartCard title="评分维度构成" desc="展示评分子维度构成，对比选中区域与全市均值。">
+                <EChart option={scoreComponentOption} className="h-[28rem] w-full" />
               </ChartCard>
             </div>
           ) : null}
