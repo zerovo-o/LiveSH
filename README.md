@@ -21,6 +21,7 @@ LiveSH 是一个面向上海居住选择分析的 WebGIS 可视化系统。项�
 - **推荐区域 Top5**：按当前默认推荐分 `calibrated_score_life_circle` 排序，并对低样本结果做降权处理。
 - **多维可视化分析**：展示房价排名、POI 结构、评分分布、相关性、象限关系、雷达对比等图表。
 - **联动交互**：点击地图、推荐卡片、区域项后，地图、指标面板和图表会同步更新。
+- **个性化 Agent 推荐**：用户输入预算、目标面积、工作地点、通勤方式和偏好权重后，后端返回街镇、小区和房源 ID 推荐，并可结合高德路线与 LLM 重排。
 - **AI 居住建议模块**：前后端接口已具备，目前返回规则占位结果，代码中预留了后续接入真实大模型的位置。
 
 ## 技术栈
@@ -159,9 +160,18 @@ cp backend/.env.example backend/.env
 ```text
 DATABASE_URL=sqlite:///./livability.db
 AMAP_WEB_SERVICE_KEY=你的高德 Web 服务 Key
+LLM_API_KEY=
+LLM_BASE_URL=
+LLM_MODEL=
+LLM_RERANK_ENABLED=
+LLM_RERANK_WEIGHT=0.3
+LLM_RERANK_TIMEOUT_SEC=60
+LLM_RERANK_MAX_CANDIDATES=12
+RECOMMENDER_VERSION=v3
 ```
 
 如果不配置 `DATABASE_URL`，后端默认使用本地 SQLite 数据库。
+`AMAP_WEB_SERVICE_KEY` 会用于个性化推荐中的工作地点地理编码和通勤路线估计；LLM 相关变量为空时，推荐接口仍会使用规则模型返回结果，只是不启用大模型重排。
 
 ### 2. 启动后端
 
@@ -217,6 +227,7 @@ Vite 已把 `/api` 和 `/health` 代理到 `127.0.0.1:8000`，因此本地开发
 | `GET /api/amap/shanghai-districts` | 上海区级边界 |
 | `GET /api/amap/shanghai-streets` | 上海街镇边界 |
 | `POST /api/ai/advice` | AI 居住建议接口 |
+| `POST /api/agent/recommend-houses` | 个性化街镇、小区和房源推荐接口 |
 
 ## 地图与坐标约定
 
@@ -242,4 +253,3 @@ Vite 已把 `/api` 和 `/health` 代理到 `127.0.0.1:8000`，因此本地开发
 - [后端接口说明](docs/后端接口说明.md)
 - [前端功能说明](docs/前端功能说明.md)
 - [地图 GIS 与高德配置](docs/地图GIS与高德配置.md)
-
