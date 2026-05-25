@@ -16,6 +16,9 @@ AMAP_WEB_SERVICE_KEY = os.getenv("AMAP_WEB_SERVICE_KEY", "")
 LLM_API_KEY = os.getenv("LLM_API_KEY", "")
 LLM_BASE_URL = os.getenv("LLM_BASE_URL", "")
 LLM_MODEL = os.getenv("LLM_MODEL", "")
+DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY", LLM_API_KEY)
+DEEPSEEK_BASE_URL = os.getenv("DEEPSEEK_BASE_URL", LLM_BASE_URL or "https://api.deepseek.com")
+DEEPSEEK_MODEL = os.getenv("DEEPSEEK_MODEL", LLM_MODEL or "deepseek-v4-flash")
 _llm_rerank_raw = os.getenv("LLM_RERANK_ENABLED", "").strip().lower()
 if _llm_rerank_raw:
     LLM_RERANK_ENABLED = _llm_rerank_raw in {"1", "true", "yes", "on"}

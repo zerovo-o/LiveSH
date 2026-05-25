@@ -212,6 +212,7 @@ const MapPanel = memo(function MapPanel({ districts, selectedDistrict, recommend
   const [streetMetrics, setStreetMetrics] = useState<StreetMetric[]>([]);
   const [showStreetBoundaries, setShowStreetBoundaries] = useState(DEFAULT_SHOW_STREET_BOUNDARIES);
   const [districtBubbles, setDistrictBubbles] = useState<DistrictBubblePosition[]>([]);
+  const [infoWindowOpen, setInfoWindowOpen] = useState(false);
 
   const metricByName = useMemo(() => {
     const map = new Map<string, DistrictMetric>();
@@ -330,6 +331,7 @@ const MapPanel = memo(function MapPanel({ districts, selectedDistrict, recommend
             offset: new AMap.Pixel(0, -18),
             closeWhenClickMap: true
           });
+          infoWindowRef.current.on("close", () => setInfoWindowOpen(false));
 
           const clearPolygons = (items: any[]) => {
             items.forEach((polygon) => map.remove(polygon));
@@ -391,11 +393,10 @@ const MapPanel = memo(function MapPanel({ districts, selectedDistrict, recommend
                   cursor: "pointer",
                   zIndex: 12
                 });
-                polygon.on("click", () => onSelectDistrict(districtName));
-                polygon.on("mouseover", (event: any) => {
+                polygon.on("click", (event: any) => {
                   const mode = mapModeRef.current;
                   const modeConfig = mapModes[mode];
-                  polygon.setOptions({ fillOpacity: metric ? 0.72 : 0.3, strokeWeight: 1.2, strokeOpacity: 0.9 });
+                  onSelectDistrict(districtName);
                   infoWindowRef.current?.setContent(
                     metric
                       ? `<div class="map-tooltip">
@@ -418,6 +419,10 @@ const MapPanel = memo(function MapPanel({ districts, selectedDistrict, recommend
                         </div>`
                   );
                   infoWindowRef.current?.open(map, event.lnglat);
+                  setInfoWindowOpen(true);
+                });
+                polygon.on("mouseover", () => {
+                  polygon.setOptions({ fillOpacity: metric ? 0.72 : 0.3, strokeWeight: 1.2, strokeOpacity: 0.9 });
                 });
                 polygon.on("mouseout", () => {
                   polygon.setOptions({
@@ -602,6 +607,7 @@ const MapPanel = memo(function MapPanel({ districts, selectedDistrict, recommend
     });
     if (!showStreetBoundaries) {
       infoWindowRef.current?.close();
+      setInfoWindowOpen(false);
     }
   }, [showStreetBoundaries]);
 
@@ -656,7 +662,7 @@ const MapPanel = memo(function MapPanel({ districts, selectedDistrict, recommend
       </div>
 
       <div ref={containerRef} className="h-full w-full" />
-      <div className="pointer-events-none absolute inset-0 z-[18]">
+      <div className={`pointer-events-none absolute inset-0 z-[8] transition-opacity ${infoWindowOpen ? "opacity-0" : "opacity-100"}`}>
         {districtBubbles.map(({ district, x, y, metric }) => {
           const color = getModeColor(metric, mapMode, districts);
           const size = getBubbleSize(metric, mapMode, districts);
