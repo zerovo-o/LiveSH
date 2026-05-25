@@ -1,7 +1,7 @@
 import type { EChartsOption } from "echarts";
 import type { ComponentProps, ReactNode } from "react";
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Loader2, Sparkles } from "lucide-react";
+import { Loader2, Sparkles, X } from "lucide-react";
 import EChart from "./charts/EChart";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import type { ChartInsight, DistrictMetric, PoiCategory } from "../types/metrics";
@@ -935,43 +935,60 @@ function ChartCard({
   ) => void;
 }) {
   const hasInsightContent = Boolean(insight || loading || error);
+  const [insightOpen, setInsightOpen] = useState(false);
+  const handleInsightClick = () => {
+    setInsightOpen(true);
+    onInsight(chartId, title, desc, insightData, scope, selectedDistrictForInsight);
+  };
+
+  useEffect(() => {
+    if (loading || insight || error) setInsightOpen(true);
+  }, [error, insight, loading]);
+
   return (
     <Card className="shrink-0 rounded-[18px] border-[#f1dfc9] bg-[#fffdf8]/92 shadow-[0_12px_34px_rgba(104,72,42,0.08)]">
       <CardHeader className="pb-2">
         <CardTitle className="text-base font-black text-[#3c2a20]">{title}</CardTitle>
         {desc ? <p className="mt-1 text-sm text-[#6b5345]">{desc}</p> : null}
       </CardHeader>
-      <CardContent className="grid gap-4 pb-4 lg:grid-cols-[minmax(0,1fr)_22rem]">
-        <div className="min-w-0">{children}</div>
-        <aside className="flex min-h-48 flex-col rounded-xl border border-[#efcfb1] bg-[#fffaf0]/72 p-4 text-left shadow-[0_12px_30px_rgba(73,47,28,0.10)] backdrop-blur-sm">
-          <div className="flex items-start justify-between gap-3">
-            <div>
-              <div className="flex items-center gap-2 text-sm font-black text-[#3c2a20]">
-                <Sparkles className="h-4 w-4 text-[#d45f34]" />
-                AI 图表结论
+      <CardContent className="relative pb-4">
+        <div className="min-w-0 pr-0 lg:pr-[25rem]">{children}</div>
+        <button
+          type="button"
+          onClick={handleInsightClick}
+          disabled={loading}
+          className="absolute bottom-4 right-4 z-10 inline-flex h-9 items-center justify-center gap-2 rounded-lg border border-[#f0d1b5] bg-white/82 px-3 text-sm font-semibold text-[#c65f32] shadow-[0_8px_18px_rgba(104,72,42,0.12)] backdrop-blur transition hover:border-[#ffad7d] hover:bg-[#fff3e5] disabled:cursor-not-allowed disabled:opacity-70"
+        >
+          {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
+          {insight || error ? "查看结论" : "生成结论"}
+        </button>
+        {insightOpen && hasInsightContent ? (
+          <aside className="absolute right-4 top-0 z-20 flex max-h-[calc(100%-4rem)] w-[min(24rem,calc(100%-2rem))] flex-col rounded-xl border border-[#efcfb1] bg-[#fffaf0]/82 p-4 text-left shadow-[0_18px_48px_rgba(73,47,28,0.18)] backdrop-blur-md">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <div className="flex items-center gap-2 text-sm font-black text-[#3c2a20]">
+                  <Sparkles className="h-4 w-4 text-[#d45f34]" />
+                  AI 图表结论
+                </div>
+                {insight?.is_placeholder ? <p className="mt-1 text-xs font-semibold text-[#a46322]">本地兜底结果</p> : null}
               </div>
-              {insight?.is_placeholder ? <p className="mt-1 text-xs font-semibold text-[#a46322]">本地兜底结果</p> : null}
+              <button
+                type="button"
+                title="关闭"
+                aria-label="关闭 AI 图表结论"
+                onClick={() => setInsightOpen(false)}
+                className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-[#7a5a45] transition hover:bg-[#f7e7d4] hover:text-[#3c2a20]"
+              >
+                <X className="h-4 w-4" />
+              </button>
             </div>
-          </div>
-          <div className="mt-3 flex-1 overflow-y-auto pr-1 text-sm leading-7 text-[#5f4a3d]">
-            {hasInsightContent ? (
+            <div className="mt-3 overflow-y-auto pr-1 text-sm leading-7 text-[#5f4a3d]">
               <p className="whitespace-pre-wrap">
                 {error ?? (loading ? "正在生成结论..." : insight?.insight ?? "暂无结论。")}
               </p>
-            ) : (
-              <p className="text-[#806653]">点击下方按钮，生成这张图表的数据结论。</p>
-            )}
-          </div>
-          <button
-            type="button"
-            onClick={() => onInsight(chartId, title, desc, insightData, scope, selectedDistrictForInsight)}
-            disabled={loading}
-            className="mt-4 inline-flex h-9 items-center justify-center gap-2 rounded-lg border border-[#f0d1b5] bg-white/78 px-3 text-sm font-semibold text-[#c65f32] shadow-[0_8px_18px_rgba(104,72,42,0.10)] transition hover:border-[#ffad7d] hover:bg-[#fff3e5] disabled:cursor-not-allowed disabled:opacity-70"
-          >
-            {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
-            {insight ? "查看结论" : "生成结论"}
-          </button>
-        </aside>
+            </div>
+          </aside>
+        ) : null}
       </CardContent>
     </Card>
   );

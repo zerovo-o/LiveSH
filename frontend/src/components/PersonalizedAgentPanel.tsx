@@ -81,7 +81,6 @@ export default function PersonalizedAgentPanel() {
         </div>
         <div>
           <h2 className="text-2xl font-black text-[#33251f]">个性化 Agent 推荐</h2>
-          <p className="mt-1 text-sm text-[#806653]">规则打分 + 通勤评估 + LLM 重排</p>
         </div>
       </div>
 
