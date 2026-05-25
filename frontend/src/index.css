@@ -111,3 +111,8 @@ textarea {
   font-size: 14px;
   font-weight: 700;
 }
+
+.amap-info,
+.amap-info-contentContainer {
+  z-index: 80 !important;
+}

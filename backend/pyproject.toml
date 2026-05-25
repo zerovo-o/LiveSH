@@ -16,6 +16,7 @@ dependencies = [
   "scipy>=1.11",
   "sqlalchemy>=2.0",
   "python-dotenv>=0.21",
+  "certifi>=2024.0.0",
 ]
 
 [project.optional-dependencies]

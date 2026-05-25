@@ -7,11 +7,12 @@ from sqlalchemy.orm import Session
 
 from .ai_advice import generate_ai_advice
 from .amap import fetch_local_shanghai_street_boundaries, fetch_shanghai_district_boundaries
+from .chart_insight import generate_chart_insight
 from .database import Base, engine, get_db
 from .house_recommend_schemas import HouseRecommendRequest, HouseRecommendResponse
 from .models import DistrictMetric, PoiCategoryMetric, StreetMetric
 from .recommend_houses import recommend_houses
-from .schemas import AIAdviceOut, AIAdviceRequest, DistrictMetricOut, StreetMetricOut, SummaryOut
+from .schemas import AIAdviceOut, AIAdviceRequest, ChartInsightOut, ChartInsightRequest, DistrictMetricOut, StreetMetricOut, SummaryOut
 
 Base.metadata.create_all(bind=engine)
 
@@ -103,6 +104,16 @@ def ai_advice(payload: AIAdviceRequest, db: Session = Depends(get_db)):
         "district": metric.district,
         "prompt": prompt,
         "advice": advice,
+        "is_placeholder": is_placeholder,
+    }
+
+
+@app.post("/api/ai/chart-insight", response_model=ChartInsightOut)
+def chart_insight(payload: ChartInsightRequest):
+    insight, is_placeholder = generate_chart_insight(payload)
+    return {
+        "chart_id": payload.chart_id,
+        "insight": insight,
         "is_placeholder": is_placeholder,
     }
 

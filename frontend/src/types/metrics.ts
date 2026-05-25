@@ -81,3 +81,9 @@ export type AIAdvice = {
   advice: string;
   is_placeholder: boolean;
 };
+
+export type ChartInsight = {
+  chart_id: string;
+  insight: string;
+  is_placeholder: boolean;
+};

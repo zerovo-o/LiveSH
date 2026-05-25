@@ -1,9 +1,10 @@
 import type { EChartsOption } from "echarts";
-import type { ReactNode } from "react";
-import { memo, useCallback, useMemo, useState } from "react";
+import type { ComponentProps, ReactNode } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Loader2, Sparkles, X } from "lucide-react";
 import EChart from "./charts/EChart";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
-import type { DistrictMetric, PoiCategory } from "../types/metrics";
+import type { ChartInsight, DistrictMetric, PoiCategory } from "../types/metrics";
 
 type ModuleId = "overview" | "poi" | "relation" | "model";
 
@@ -38,6 +39,8 @@ type MetricKey =
   | "e2sfca_access_score"
   | "calibrated_score"
   | "calibrated_score_life_circle";
+
+type ChartClickParam = Parameters<NonNullable<ComponentProps<typeof EChart>["onClick"]>>[0];
 
 const axisText = { color: "#7b6758", fontSize: 11 };
 const grid = { top: 20, left: 46, right: 18, bottom: 46 };
@@ -84,6 +87,23 @@ const radarFields: { key: MetricKey; label: string; inverse?: boolean }[] = [
   { key: "calibrated_score_life_circle", label: "校准评分" }
 ];
 
+const selectedDependentChartIds = new Set([
+  "priceTop10",
+  "scoreRanking",
+  "quadrant",
+  "groupedPoi",
+  "poiStack",
+  "shoppingTop5",
+  "radar",
+  "accessValue",
+  "parallel",
+  "perHouse",
+  "scoreModelCompare",
+  "lifeCircleCompare",
+  "sampleReliability",
+  "scoreComponent"
+]);
+
 const ChartsPanel = memo(function ChartsPanel({
   priceTop10,
   poiCategories,
@@ -94,17 +114,79 @@ const ChartsPanel = memo(function ChartsPanel({
   onSelectDistrict
 }: ChartsPanelProps) {
   const [activeModule, setActiveModule] = useState<ModuleId>("overview");
+  const [insights, setInsights] = useState<Record<string, ChartInsight>>({});
+  const [insightLoading, setInsightLoading] = useState<Record<string, boolean>>({});
+  const [insightErrors, setInsightErrors] = useState<Record<string, string>>({});
+  const previousSelectedDistrict = useRef<string | null>(selectedDistrict);
   const selectedMetric = useMemo(
     () => scatter.find((item) => item.district === selectedDistrict) ?? scoreRanking[0] ?? scatter[0],
     [scatter, scoreRanking, selectedDistrict]
   );
+  const cityMetric = useMemo(() => buildAverageMetric(scatter), [scatter]);
+
+  useEffect(() => {
+    if (previousSelectedDistrict.current === selectedDistrict) return;
+    previousSelectedDistrict.current = selectedDistrict;
+    const removeSelectedDependent = <T,>(items: Record<string, T>) => {
+      const next = { ...items };
+      selectedDependentChartIds.forEach((chartId) => {
+        delete next[chartId];
+      });
+      return next;
+    };
+    setInsights(removeSelectedDependent);
+    setInsightLoading(removeSelectedDependent);
+    setInsightErrors(removeSelectedDependent);
+  }, [selectedDistrict]);
 
   const handleChartClick = useCallback(
-    (params: any) => {
-      const name = typeof params.name === "string" ? params.name : params.data?.name;
-      if (name) onSelectDistrict(name);
+    (params: ChartClickParam) => {
+      const dataName = readObjectField(params.data, "name");
+      const name = typeof params.name === "string" ? params.name : dataName;
+      if (typeof name === "string") onSelectDistrict(name);
     },
     [onSelectDistrict]
+  );
+
+  const loadChartInsight = useCallback(
+    async (
+      chartId: string,
+      title: string,
+      description: string | undefined,
+      data: Record<string, unknown>,
+      scope?: string,
+      selectedDistrictForInsight?: string | null
+    ) => {
+      if (insights[chartId]) return;
+      setInsightLoading((prev) => ({ ...prev, [chartId]: true }));
+      setInsightErrors((prev) => {
+        const next = { ...prev };
+        delete next[chartId];
+        return next;
+      });
+      try {
+        const res = await fetch("/api/ai/chart-insight", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            chart_id: chartId,
+            title,
+            description,
+            scope,
+            selected_district: selectedDistrictForInsight === undefined ? selectedDistrict : selectedDistrictForInsight,
+            data
+          })
+        });
+        if (!res.ok) throw new Error(`API ${res.status}`);
+        const insight = (await res.json()) as ChartInsight;
+        setInsights((prev) => ({ ...prev, [chartId]: insight }));
+      } catch {
+        setInsightErrors((prev) => ({ ...prev, [chartId]: "AI 结论生成失败，请检查后端服务与 DeepSeek 配置。" }));
+      } finally {
+        setInsightLoading((prev) => ({ ...prev, [chartId]: false }));
+      }
+    },
+    [insights, selectedDistrict, selectedMetric?.district]
   );
 
   const priceOption = useMemo<EChartsOption>(
@@ -199,8 +281,8 @@ const ChartsPanel = memo(function ChartsPanel({
     return {
       grid: { top: 24, left: 54, right: 22, bottom: 46 },
       tooltip: {
-        formatter: (params: any) => {
-          const data = params.data as { name: string; value: number[] };
+        formatter: (params: unknown) => {
+          const data = readPointTooltipData(params);
           return `${data.name}<br/>房价 ${Math.round(data.value[0]).toLocaleString("zh-CN")} 元/㎡<br/>商圈活跃度 ${data.value[1].toFixed(1)}<br/>POI ${Math.round(data.value[2]).toLocaleString("zh-CN")}`;
         }
       },
@@ -253,8 +335,8 @@ const ChartsPanel = memo(function ChartsPanel({
     return {
       grid: { top: 20, left: 58, right: 72, bottom: 54 },
       tooltip: {
-        formatter: (params: any) => {
-          const [x, y, value] = params.data as number[];
+        formatter: (params: unknown) => {
+          const [x, y, value] = readMatrixTooltipData(params);
           return `${relationMetrics[y].label} × ${relationMetrics[x].label}<br/>相关系数 ${value}`;
         }
       },
@@ -298,7 +380,7 @@ const ChartsPanel = memo(function ChartsPanel({
     const boxData = [[min, q1, median, q3, max]];
     return {
       grid,
-      tooltip: { formatter: (params: any) => `房价箱线图<br/>最小 ${Math.round(min)} 元/㎡<br/>Q1 ${Math.round(q1)} 元/㎡<br/>中位数 ${Math.round(median)} 元/㎡<br/>Q3 ${Math.round(q3)} 元/㎡<br/>最大 ${Math.round(max)} 元/㎡` },
+      tooltip: { formatter: () => `房价箱线图<br/>最小 ${Math.round(min)} 元/㎡<br/>Q1 ${Math.round(q1)} 元/㎡<br/>中位数 ${Math.round(median)} 元/㎡<br/>Q3 ${Math.round(q3)} 元/㎡<br/>最大 ${Math.round(max)} 元/㎡` },
       xAxis: { type: "category", data: ["房价分布"], axisLabel: axisText },
       yAxis: { type: "value", axisLabel: axisText },
       series: [
@@ -411,8 +493,8 @@ const ChartsPanel = memo(function ChartsPanel({
       })),
       parallel: { left: 48, right: 42, top: 34, bottom: 24, parallelAxisDefault: { type: "value" } },
       tooltip: {
-        formatter: (params: any) => {
-          const row = scatter[params.dataIndex];
+        formatter: (params: unknown) => {
+          const row = scatter[readNumericField(params, "dataIndex")];
           return row ? `${row.district}<br/>房价 ${Math.round(row.avg_price).toLocaleString("zh-CN")} 元/㎡<br/>POI ${row.poi_total.toLocaleString("zh-CN")}<br/>活跃度 ${row.business_activity.toFixed(1)}<br/>校准评分 ${row.calibrated_score_life_circle.toFixed(3)}` : "";
         }
       },
@@ -463,8 +545,8 @@ const ChartsPanel = memo(function ChartsPanel({
     return {
       grid: { top: 24, left: 58, right: 22, bottom: 46 },
       tooltip: {
-        formatter: (params: any) => {
-          const data = params.data as { name: string; value: number[] };
+        formatter: (params: unknown) => {
+          const data = readPointTooltipData(params);
           return `${data.name}<br/>房价 ${Math.round(data.value[0]).toLocaleString("zh-CN")} 元/㎡<br/>供需可达性 ${data.value[1].toFixed(3)}<br/>校准评分 ${data.value[2].toFixed(3)}`;
         }
       },
@@ -570,8 +652,8 @@ const ChartsPanel = memo(function ChartsPanel({
     return {
       grid: { top: 24, left: 58, right: 22, bottom: 46 },
       tooltip: {
-        formatter: (params: any) => {
-          const data = params.data as { name: string; value: number[] };
+        formatter: (params: unknown) => {
+          const data = readPointTooltipData(params);
           return `${data.name}<br/>样本量 ${Math.round(data.value[0])} 套<br/>可靠性 ${data.value[1].toFixed(3)}<br/>校准评分 ${data.value[2].toFixed(3)}`;
         }
       },
@@ -590,6 +672,133 @@ const ChartsPanel = memo(function ChartsPanel({
       ]
     };
   }, [scatter, selectedDistrict]);
+
+  const chartInsightData = useMemo<Record<string, Record<string, unknown>>>(() => {
+    const selected = selectedMetric ?? cityMetric;
+    return {
+      priceTop10: {
+        unit: "元/平方米",
+        top: priceTop10.map((d) => ({ district: d.district, value: Math.round(d.avg_price) })),
+        city_average: Math.round(cityMetric.avg_price)
+      },
+      boxplot: {
+        unit: "元/平方米",
+        values: percentileSummary(scatter.map((d) => d.avg_price)),
+        city_average: Math.round(cityMetric.avg_price)
+      },
+      scoreRanking: {
+        unit: "校准+生活圈评分",
+        top: scoreRanking.slice(0, 10).map((d) => ({ district: d.district, value: Number(d.calibrated_score_life_circle.toFixed(3)) })),
+        selected: metricSnapshot(selected),
+        city_average: metricSnapshot(cityMetric)
+      },
+      scoreHistogram: {
+        bins: [
+          { name: "低分", count: scatter.filter((d) => d.calibrated_score_life_circle < 0.15).length },
+          { name: "中低", count: scatter.filter((d) => d.calibrated_score_life_circle >= 0.15 && d.calibrated_score_life_circle < 0.3).length },
+          { name: "中高", count: scatter.filter((d) => d.calibrated_score_life_circle >= 0.3 && d.calibrated_score_life_circle < 0.45).length },
+          { name: "高分", count: scatter.filter((d) => d.calibrated_score_life_circle >= 0.45).length }
+        ]
+      },
+      quadrant: {
+        x_axis: "平均房价",
+        y_axis: "商圈活跃度",
+        city_average: { avg_price: Math.round(cityMetric.avg_price), business_activity: Number(cityMetric.business_activity.toFixed(1)) },
+        points: scatter.map((d) => ({
+          district: d.district,
+          avg_price: Math.round(d.avg_price),
+          business_activity: Number(d.business_activity.toFixed(1)),
+          poi_total: d.poi_total
+        }))
+      },
+      poiShare: {
+        scope: "上海市全市",
+        top: poiCategories.map((item) => ({ name: item.category, value: item.count }))
+      },
+      groupedPoi: {
+        top: scoreRanking.slice(0, 6).map((d) => ({
+          district: d.district,
+          shopping_count: d.shopping_count,
+          traffic_count: d.traffic_count,
+          healthcare_count: d.healthcare_count,
+          score: Number(d.calibrated_score_life_circle.toFixed(3))
+        }))
+      },
+      poiStack: {
+        top: scoreRanking.slice(0, 10).map((d) => ({
+          district: d.district,
+          shopping_count: d.shopping_count,
+          traffic_count: d.traffic_count,
+          healthcare_count: d.healthcare_count,
+          recreation_count: d.recreation_count,
+          company_count: d.company_count
+        }))
+      },
+      shoppingTop5: {
+        top: shoppingTop5.map((d) => ({ district: d.district, value: d.shopping_count }))
+      },
+      radar: {
+        selected: metricSnapshot(selected),
+        city_average: metricSnapshot(cityMetric)
+      },
+      accessValue: {
+        selected: metricSnapshot(selected),
+        city_average: metricSnapshot(cityMetric),
+        points: scatter.map((d) => ({
+          district: d.district,
+          avg_price: Math.round(d.avg_price),
+          e2sfca_access_score: Number(d.e2sfca_access_score.toFixed(3)),
+          calibrated_score_life_circle: Number(d.calibrated_score_life_circle.toFixed(3))
+        }))
+      },
+      correlation: {
+        matrix: relationMetrics.flatMap((row) =>
+          relationMetrics.map((col) => ({
+            row: row.label,
+            col: col.label,
+            value: Number(pearson(scatter, row.key, col.key).toFixed(2))
+          }))
+        )
+      },
+      parallel: {
+        points: scatter.map((d) => ({
+          district: d.district,
+          avg_price: Math.round(d.avg_price),
+          poi_total: d.poi_total,
+          business_activity: Number(d.business_activity.toFixed(1)),
+          calibrated_score_life_circle: Number(d.calibrated_score_life_circle.toFixed(3))
+        }))
+      },
+      perHouse: {
+        top: scoreRanking.slice(0, 8).map((d) => ({
+          district: d.district,
+          shopping_per_house: Number(d.shopping_per_house.toFixed(4)),
+          traffic_per_house: Number(d.traffic_per_house.toFixed(4)),
+          healthcare_per_house: Number(d.healthcare_per_house.toFixed(4))
+        }))
+      },
+      scoreModelCompare: {
+        selected: scoreModelSnapshot(selected),
+        city_average: scoreModelSnapshot(cityMetric)
+      },
+      lifeCircleCompare: {
+        selected: lifeCircleSnapshot(selected),
+        city_average: lifeCircleSnapshot(cityMetric)
+      },
+      sampleReliability: {
+        points: scatter.map((d) => ({
+          district: d.district,
+          house_count: d.house_count,
+          sample_reliability_score: Number(d.sample_reliability_score.toFixed(3)),
+          calibrated_score_life_circle: Number(d.calibrated_score_life_circle.toFixed(3))
+        }))
+      },
+      scoreComponent: {
+        selected: scoreComponentSnapshot(selected),
+        city_average: scoreComponentSnapshot(cityMetric)
+      }
+    };
+  }, [cityMetric, poiCategories, priceTop10, scatter, scoreRanking, selectedMetric, shoppingTop5]);
 
   return (
     <section className="rounded-[24px] border border-[#ead8c2] bg-[#fff8ea]/88 p-5 shadow-[0_18px_56px_rgba(104,72,42,0.10)] backdrop-blur">
@@ -615,74 +824,74 @@ const ChartsPanel = memo(function ChartsPanel({
 
         <div className="mt-5">
           {activeModule === "overview" ? (
-            <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
-              <ChartCard title="房价 Top10 区域" desc="展示各区挂牌均价前 10，点击柱状或区名联动地图。">
+            <div className="grid grid-cols-1 gap-4">
+              <ChartCard chartId="priceTop10" title="房价 Top10 区域" desc="展示各区挂牌均价前 10，点击柱状或区名联动地图。" insightData={chartInsightData.priceTop10} insight={insights.priceTop10} loading={insightLoading.priceTop10} error={insightErrors.priceTop10} onInsight={loadChartInsight}>
                 <EChart option={priceOption} className="h-72 w-full" onClick={handleChartClick} />
               </ChartCard>
-              <ChartCard title="房价分布（箱线图）" desc="展示全市房价分布的箱线，便于查看离散与异常值。">
+              <ChartCard chartId="boxplot" title="房价分布（箱线图）" desc="展示全市房价分布的箱线，便于查看离散与异常值。" insightData={chartInsightData.boxplot} insight={insights.boxplot} loading={insightLoading.boxplot} error={insightErrors.boxplot} onInsight={loadChartInsight}>
                 <EChart option={boxplotOption} className="h-72 w-full" />
               </ChartCard>
-              <ChartCard title="校准评分排名" desc="按综合校准评分排序，支持点击选中区域联动。">
+              <ChartCard chartId="scoreRanking" title="校准评分排名" desc="按综合校准评分排序，支持点击选中区域联动。" insightData={chartInsightData.scoreRanking} insight={insights.scoreRanking} loading={insightLoading.scoreRanking} error={insightErrors.scoreRanking} onInsight={loadChartInsight}>
                 <EChart option={scoreOption} className="h-72 w-full" onClick={handleChartClick} />
               </ChartCard>
-              <ChartCard title="校准评分区间分布" desc="展示区域评分分布，帮助识别高/低分簇群。">
+              <ChartCard chartId="scoreHistogram" title="校准评分区间分布" desc="展示区域评分分布，帮助识别高/低分簇群。" insightData={chartInsightData.scoreHistogram} insight={insights.scoreHistogram} loading={insightLoading.scoreHistogram} error={insightErrors.scoreHistogram} onInsight={loadChartInsight}>
                 <EChart option={scoreHistogramOption} className="h-64 w-full" />
               </ChartCard>
-              <ChartCard title="房价与便利性象限" desc="按房价与商圈活跃度分象限，象限线为均值。">
+              <ChartCard chartId="quadrant" title="房价与便利性象限" desc="按房价与商圈活跃度分象限，象限线为均值。" insightData={chartInsightData.quadrant} insight={insights.quadrant} loading={insightLoading.quadrant} error={insightErrors.quadrant} onInsight={loadChartInsight}>
                 <EChart option={quadrantOption} className="h-64 w-full" onClick={handleChartClick} />
               </ChartCard>
             </div>
           ) : null}
 
           {activeModule === "poi" ? (
-            <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
-              <ChartCard title="POI类别占比" desc="各类 POI 占比，反映区内配套结构。">
+            <div className="grid grid-cols-1 gap-4">
+              <ChartCard chartId="poiShare" title="POI类别占比" desc="全市各类 POI 占比，反映上海整体配套结构。" scope="上海市全市" selectedDistrictForInsight={null} insightData={chartInsightData.poiShare} insight={insights.poiShare} loading={insightLoading.poiShare} error={insightErrors.poiShare} onInsight={loadChartInsight}>
                 <EChart option={poiOption} className="h-72 w-full" />
               </ChartCard>
-              <ChartCard title="热门区域 POI 分组柱状图" desc="对比高评分区域中购物、交通、医疗三类 POI。">
+              <ChartCard chartId="groupedPoi" title="热门区域 POI 分组柱状图" desc="对比高评分区域中购物、交通、医疗三类 POI。" insightData={chartInsightData.groupedPoi} insight={insights.groupedPoi} loading={insightLoading.groupedPoi} error={insightErrors.groupedPoi} onInsight={loadChartInsight}>
                 <EChart option={groupedPoiOption} className="h-72 w-full" onClick={handleChartClick} />
               </ChartCard>
-              <ChartCard title="校准评分较高区域 POI 结构" desc="展示高评分区域中不同 POI 类型的构成。">
+              <ChartCard chartId="poiStack" title="校准评分较高区域 POI 结构" desc="展示高评分区域中不同 POI 类型的构成。" insightData={chartInsightData.poiStack} insight={insights.poiStack} loading={insightLoading.poiStack} error={insightErrors.poiStack} onInsight={loadChartInsight}>
                 <EChart option={poiStackOption} className="h-72 w-full" onClick={handleChartClick} />
               </ChartCard>
-              <ChartCard title="购物数量 Top5 区域" desc="展示购物类 POI 数量排名前 5 的区域。">
+              <ChartCard chartId="shoppingTop5" title="购物数量 Top5 区域" desc="展示购物类 POI 数量排名前 5 的区域。" insightData={chartInsightData.shoppingTop5} insight={insights.shoppingTop5} loading={insightLoading.shoppingTop5} error={insightErrors.shoppingTop5} onInsight={loadChartInsight}>
                 <EChart option={shoppingOption} className="h-64 w-full" onClick={handleChartClick} />
               </ChartCard>
-              <ChartCard title="选中区域 vs 全市均值" desc="雷达对比选中区域与全市均值各项标准化指标。">
+              <ChartCard chartId="radar" title="选中区域 vs 全市均值" desc="雷达对比选中区域与全市均值各项标准化指标。" insightData={chartInsightData.radar} insight={insights.radar} loading={insightLoading.radar} error={insightErrors.radar} onInsight={loadChartInsight}>
                 <EChart option={radarOption} className="h-64 w-full" onClick={handleChartClick} />
               </ChartCard>
             </div>
           ) : null}
 
           {activeModule === "relation" ? (
-            <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
-              <ChartCard title="可达性与房价性价比" desc="供需可达性分与房价的关系，气泡大小反映校准评分。">
+            <div className="grid grid-cols-1 gap-4">
+              <ChartCard chartId="accessValue" title="可达性与房价性价比" desc="供需可达性分与房价的关系，气泡大小反映校准评分。" insightData={chartInsightData.accessValue} insight={insights.accessValue} loading={insightLoading.accessValue} error={insightErrors.accessValue} onInsight={loadChartInsight}>
                 <EChart option={accessValueOption} className="h-80 w-full" onClick={handleChartClick} />
               </ChartCard>
-              <ChartCard title="指标相关性热力图" desc="展示指标间 Pearson 相关系数，颜色越暖相关越强。">
+              <ChartCard chartId="correlation" title="指标相关性热力图" desc="展示指标间 Pearson 相关系数，颜色越暖相关越强。" insightData={chartInsightData.correlation} insight={insights.correlation} loading={insightLoading.correlation} error={insightErrors.correlation} onInsight={loadChartInsight}>
                 <EChart option={correlationOption} className="h-80 w-full" />
               </ChartCard>
-              <ChartCard title="多指标平行坐标" desc="展示多维指标分布，点击线条可联动选中区域。">
+              <ChartCard chartId="parallel" title="多指标平行坐标" desc="展示多维指标分布，点击线条可联动选中区域。" insightData={chartInsightData.parallel} insight={insights.parallel} loading={insightLoading.parallel} error={insightErrors.parallel} onInsight={loadChartInsight}>
                 <EChart option={parallelOption} className="h-72 w-full" onClick={handleChartClick} />
               </ChartCard>
-              <ChartCard title="人均设施供给强度" desc="每套房的购物/交通/医疗 POI 供给数，反映设施密度。">
+              <ChartCard chartId="perHouse" title="人均设施供给强度" desc="每套房的购物/交通/医疗 POI 供给数，反映设施密度。" insightData={chartInsightData.perHouse} insight={insights.perHouse} loading={insightLoading.perHouse} error={insightErrors.perHouse} onInsight={loadChartInsight}>
                 <EChart option={perHouseOption} className="h-72 w-full" onClick={handleChartClick} />
               </ChartCard>
             </div>
           ) : null}
 
           {activeModule === "model" ? (
-            <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
-              <ChartCard title="评分体系迭代对比" desc="对比不同阶段评分模型在选中区域的表现差异。">
+            <div className="grid grid-cols-1 gap-4">
+              <ChartCard chartId="scoreModelCompare" title="评分体系迭代对比" desc="对比不同阶段评分模型在选中区域的表现差异。" insightData={chartInsightData.scoreModelCompare} insight={insights.scoreModelCompare} loading={insightLoading.scoreModelCompare} error={insightErrors.scoreModelCompare} onInsight={loadChartInsight}>
                 <EChart option={scoreModelCompareOption} className="h-80 w-full" />
               </ChartCard>
-              <ChartCard title="生活圈覆盖率对比" desc="5/10/15分钟生活圈覆盖率，对比选中区域与全市均值。">
+              <ChartCard chartId="lifeCircleCompare" title="生活圈覆盖率对比" desc="5/10/15分钟生活圈覆盖率，对比选中区域与全市均值。" insightData={chartInsightData.lifeCircleCompare} insight={insights.lifeCircleCompare} loading={insightLoading.lifeCircleCompare} error={insightErrors.lifeCircleCompare} onInsight={loadChartInsight}>
                 <EChart option={lifeCircleCompareOption} className="h-80 w-full" />
               </ChartCard>
-              <ChartCard title="样本量与评分可靠性" desc="挂牌样本量与可靠性评分的关系，气泡大小反映校准评分。">
+              <ChartCard chartId="sampleReliability" title="样本量与评分可靠性" desc="挂牌样本量与可靠性评分的关系，气泡大小反映校准评分。" insightData={chartInsightData.sampleReliability} insight={insights.sampleReliability} loading={insightLoading.sampleReliability} error={insightErrors.sampleReliability} onInsight={loadChartInsight}>
                 <EChart option={sampleReliabilityOption} className="h-[28rem] w-full" onClick={handleChartClick} />
               </ChartCard>
-              <ChartCard title="评分维度构成" desc="展示评分子维度构成，对比选中区域与全市均值。">
+              <ChartCard chartId="scoreComponent" title="评分维度构成" desc="展示评分子维度构成，对比选中区域与全市均值。" insightData={chartInsightData.scoreComponent} insight={insights.scoreComponent} loading={insightLoading.scoreComponent} error={insightErrors.scoreComponent} onInsight={loadChartInsight}>
                 <EChart option={scoreComponentOption} className="h-[28rem] w-full" />
               </ChartCard>
             </div>
@@ -693,14 +902,94 @@ const ChartsPanel = memo(function ChartsPanel({
   );
 });
 
-function ChartCard({ title, children, desc }: { title: string; children: ReactNode; desc?: string }) {
+function ChartCard({
+  title,
+  children,
+  desc,
+  chartId,
+  insightData,
+  scope,
+  selectedDistrictForInsight,
+  insight,
+  loading,
+  error,
+  onInsight
+}: {
+  title: string;
+  children: ReactNode;
+  desc?: string;
+  chartId: string;
+  insightData: Record<string, unknown>;
+  scope?: string;
+  selectedDistrictForInsight?: string | null;
+  insight?: ChartInsight;
+  loading?: boolean;
+  error?: string;
+  onInsight: (
+    chartId: string,
+    title: string,
+    description: string | undefined,
+    data: Record<string, unknown>,
+    scope?: string,
+    selectedDistrictForInsight?: string | null
+  ) => void;
+}) {
+  const hasInsightContent = Boolean(insight || loading || error);
+  const [insightOpen, setInsightOpen] = useState(false);
+  const handleInsightClick = () => {
+    setInsightOpen(true);
+    onInsight(chartId, title, desc, insightData, scope, selectedDistrictForInsight);
+  };
+
+  useEffect(() => {
+    if (loading || insight || error) setInsightOpen(true);
+  }, [error, insight, loading]);
+
   return (
     <Card className="shrink-0 rounded-[18px] border-[#f1dfc9] bg-[#fffdf8]/92 shadow-[0_12px_34px_rgba(104,72,42,0.08)]">
       <CardHeader className="pb-2">
         <CardTitle className="text-base font-black text-[#3c2a20]">{title}</CardTitle>
         {desc ? <p className="mt-1 text-sm text-[#6b5345]">{desc}</p> : null}
       </CardHeader>
-      <CardContent>{children}</CardContent>
+      <CardContent className="relative pb-4">
+        <div className="min-w-0 pr-0 lg:pr-[25rem]">{children}</div>
+        <button
+          type="button"
+          onClick={handleInsightClick}
+          disabled={loading}
+          className="absolute bottom-4 right-4 z-10 inline-flex h-9 items-center justify-center gap-2 rounded-lg border border-[#f0d1b5] bg-white/82 px-3 text-sm font-semibold text-[#c65f32] shadow-[0_8px_18px_rgba(104,72,42,0.12)] backdrop-blur transition hover:border-[#ffad7d] hover:bg-[#fff3e5] disabled:cursor-not-allowed disabled:opacity-70"
+        >
+          {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
+          {insight || error ? "查看结论" : "生成结论"}
+        </button>
+        {insightOpen && hasInsightContent ? (
+          <aside className="absolute right-4 top-0 z-20 flex max-h-[calc(100%-4rem)] w-[min(24rem,calc(100%-2rem))] flex-col rounded-xl border border-[#efcfb1] bg-[#fffaf0]/82 p-4 text-left shadow-[0_18px_48px_rgba(73,47,28,0.18)] backdrop-blur-md">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <div className="flex items-center gap-2 text-sm font-black text-[#3c2a20]">
+                  <Sparkles className="h-4 w-4 text-[#d45f34]" />
+                  AI 图表结论
+                </div>
+                {insight?.is_placeholder ? <p className="mt-1 text-xs font-semibold text-[#a46322]">本地兜底结果</p> : null}
+              </div>
+              <button
+                type="button"
+                title="关闭"
+                aria-label="关闭 AI 图表结论"
+                onClick={() => setInsightOpen(false)}
+                className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-[#7a5a45] transition hover:bg-[#f7e7d4] hover:text-[#3c2a20]"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            <div className="mt-3 overflow-y-auto pr-1 text-sm leading-7 text-[#5f4a3d]">
+              <p className="whitespace-pre-wrap">
+                {error ?? (loading ? "正在生成结论..." : insight?.insight ?? "暂无结论。")}
+              </p>
+            </div>
+          </aside>
+        ) : null}
+      </CardContent>
     </Card>
   );
 }
@@ -746,6 +1035,95 @@ function buildRanges(items: DistrictMetric[], keys: MetricKey[]) {
 function normalize(value: number, range: { min: number; max: number }) {
   if (!Number.isFinite(value) || range.max === range.min) return 0.5;
   return (value - range.min) / (range.max - range.min);
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+function readObjectField(value: unknown, key: string) {
+  return isRecord(value) ? value[key] : undefined;
+}
+
+function readNumericField(value: unknown, key: string) {
+  const field = readObjectField(value, key);
+  return typeof field === "number" ? field : -1;
+}
+
+function readPointTooltipData(params: unknown) {
+  const data = readObjectField(params, "data");
+  if (!isRecord(data)) return { name: "", value: [0, 0, 0] };
+  const name = typeof data.name === "string" ? data.name : "";
+  const value = Array.isArray(data.value) ? data.value.map((item) => Number(item)) : [0, 0, 0];
+  return { name, value };
+}
+
+function readMatrixTooltipData(params: unknown) {
+  const data = readObjectField(params, "data");
+  return Array.isArray(data) ? data.map((item) => Number(item)) : [0, 0, 0];
+}
+
+function percentileSummary(values: number[]) {
+  const sorted = values.filter((value) => Number.isFinite(value)).sort((a, b) => a - b);
+  if (!sorted.length) return null;
+  const q = (p: number) => {
+    const idx = (sorted.length - 1) * p;
+    const lo = Math.floor(idx);
+    const hi = Math.ceil(idx);
+    return lo === hi ? sorted[lo] : sorted[lo] * (hi - idx) + sorted[hi] * (idx - lo);
+  };
+  return {
+    min: Math.round(sorted[0]),
+    q1: Math.round(q(0.25)),
+    median: Math.round(q(0.5)),
+    q3: Math.round(q(0.75)),
+    max: Math.round(sorted[sorted.length - 1])
+  };
+}
+
+function metricSnapshot(metric: DistrictMetric) {
+  return {
+    district: metric.district,
+    avg_price: Math.round(metric.avg_price),
+    poi_total: Math.round(metric.poi_total),
+    shopping_count: Math.round(metric.shopping_count),
+    traffic_count: Math.round(metric.traffic_count),
+    healthcare_count: Math.round(metric.healthcare_count),
+    business_activity: Number(metric.business_activity.toFixed(2)),
+    e2sfca_access_score: Number(metric.e2sfca_access_score.toFixed(3)),
+    calibrated_score: Number(metric.calibrated_score.toFixed(3)),
+    calibrated_score_life_circle: Number(metric.calibrated_score_life_circle.toFixed(3))
+  };
+}
+
+function scoreModelSnapshot(metric: DistrictMetric) {
+  return {
+    district: metric.district,
+    livability_score: Number(metric.livability_score.toFixed(4)),
+    livability_score_v2: Number(metric.livability_score_v2.toFixed(4)),
+    calibrated_score: Number(metric.calibrated_score.toFixed(4)),
+    calibrated_score_life_circle: Number(metric.calibrated_score_life_circle.toFixed(4))
+  };
+}
+
+function lifeCircleSnapshot(metric: DistrictMetric) {
+  return {
+    district: metric.district,
+    life_circle_5min_coverage: Number(metric.life_circle_5min_coverage.toFixed(3)),
+    life_circle_10min_coverage: Number(metric.life_circle_10min_coverage.toFixed(3)),
+    life_circle_15min_coverage: Number(metric.life_circle_15min_coverage.toFixed(3))
+  };
+}
+
+function scoreComponentSnapshot(metric: DistrictMetric) {
+  return {
+    district: metric.district,
+    affordability_score: Number(metric.affordability_score.toFixed(4)),
+    service_score: Number(metric.service_score.toFixed(4)),
+    vitality_score: Number(metric.vitality_score.toFixed(4)),
+    life_circle_score: Number(metric.life_circle_score.toFixed(4)),
+    e2sfca_access_score: Number(metric.e2sfca_access_score.toFixed(4))
+  };
 }
 
 function buildAverageMetric(items: DistrictMetric[]): DistrictMetric {

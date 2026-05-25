@@ -149,3 +149,18 @@ class AIAdviceOut(BaseModel):
     prompt: str
     advice: str
     is_placeholder: bool = True
+
+
+class ChartInsightRequest(BaseModel):
+    chart_id: str
+    title: str
+    description: str | None = None
+    scope: str | None = None
+    selected_district: str | None = None
+    data: dict
+
+
+class ChartInsightOut(BaseModel):
+    chart_id: str
+    insight: str
+    is_placeholder: bool = False

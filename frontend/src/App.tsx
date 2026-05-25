@@ -27,7 +27,11 @@ function App() {
       const data = (await res.json()) as Summary;
       setSummary(data);
       setSelectedDistrict((prev) =>
-        prev && data.districts.some((item) => item.district === prev) ? prev : null
+        prev && data.districts.some((item) => item.district === prev)
+          ? prev
+          : data.districts.some((item) => item.district === "杨浦")
+            ? "杨浦"
+            : null
       );
     } catch {
       setError("后端 API 不可用。请先运行数据入库脚本并启动 FastAPI。");
