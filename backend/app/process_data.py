@@ -120,10 +120,36 @@ def assign_streets(rows: pd.DataFrame, streets: list[dict]) -> pd.DataFrame:
 
 STANDARD_HOUSE_COLUMNS = [
     "house_id",
+    "source",
+    "title",
     "district",
     "street",
+    "community_name",
     "price",
     "unit_price",
+    "area",
+    "room_count",
+    "hall_count",
+    "toilet_count",
+    "year_built",
+    "total_floors",
+    "community_households",
+    "property_fee",
+    "greening_rate",
+    "community_avg_price",
+    "renovation",
+    "floor_location",
+    "property_type",
+    "property_right",
+    "property_years",
+    "certificate_age",
+    "faces_south",
+    "faces_north_south",
+    "near_subway_text_flag",
+    "parking_text_flag",
+    "square_layout_text_flag",
+    "many_followers_text_flag",
+    "has_elevator_text_flag",
     "wgs84_lng",
     "wgs84_lat",
     "gcj02_lng",
@@ -134,6 +160,19 @@ STANDARD_HOUSE_COLUMNS = [
 def load_standard_house_rows(df: pd.DataFrame) -> pd.DataFrame:
     cols = [column for column in STANDARD_HOUSE_COLUMNS if column in df.columns]
     result = df[cols].copy()
+    for text_col, default in {
+        "source": "unknown",
+        "title": "",
+        "community_name": None,
+        "renovation": None,
+        "floor_location": None,
+        "property_type": None,
+        "property_right": None,
+        "property_years": None,
+        "certificate_age": None,
+    }.items():
+        if text_col not in result.columns:
+            result[text_col] = default
     if "street" not in result.columns:
         result["street"] = None
     if "is_valid_for_algorithm" in df.columns:
@@ -141,10 +180,43 @@ def load_standard_house_rows(df: pd.DataFrame) -> pd.DataFrame:
     result = result.dropna(subset=["house_id", "district", "price", "unit_price", "wgs84_lng", "wgs84_lat", "gcj02_lng", "gcj02_lat"])
     result = result.drop_duplicates(subset=["house_id"])
     result["district"] = result["district"].map(normalize_district)
-    numeric_cols = ["price", "unit_price", "wgs84_lng", "wgs84_lat", "gcj02_lng", "gcj02_lat"]
+    numeric_cols = [
+        "price",
+        "unit_price",
+        "area",
+        "room_count",
+        "hall_count",
+        "toilet_count",
+        "year_built",
+        "total_floors",
+        "community_households",
+        "property_fee",
+        "greening_rate",
+        "community_avg_price",
+        "wgs84_lng",
+        "wgs84_lat",
+        "gcj02_lng",
+        "gcj02_lat",
+    ]
     for column in numeric_cols:
-        result[column] = pd.to_numeric(result[column], errors="coerce")
-    result = result.dropna(subset=numeric_cols)
+        if column in result.columns:
+            result[column] = pd.to_numeric(result[column], errors="coerce")
+    required_numeric = ["price", "unit_price", "wgs84_lng", "wgs84_lat", "gcj02_lng", "gcj02_lat"]
+    result = result.dropna(subset=required_numeric)
+    flag_cols = [
+        "faces_south",
+        "faces_north_south",
+        "near_subway_text_flag",
+        "parking_text_flag",
+        "square_layout_text_flag",
+        "many_followers_text_flag",
+        "has_elevator_text_flag",
+    ]
+    for col in flag_cols:
+        if col in result.columns:
+            result[col] = result[col].fillna(False).astype(bool).astype(int)
+        else:
+            result[col] = 0
     return result[(result["wgs84_lng"].between(120.5, 122.2)) & (result["wgs84_lat"].between(30.5, 31.9))]
 
 
@@ -169,6 +241,33 @@ def load_legacy_house_rows(df: pd.DataFrame) -> pd.DataFrame:
     result["gcj02_lng"] = [item[0] for item in gcj]
     result["gcj02_lat"] = [item[1] for item in gcj]
     result["street"] = None
+    # Backfill extended columns for legacy datasets.
+    result["source"] = "legacy"
+    result["title"] = ""
+    result["community_name"] = None
+    result["area"] = None
+    result["room_count"] = None
+    result["hall_count"] = None
+    result["toilet_count"] = None
+    result["year_built"] = None
+    result["total_floors"] = None
+    result["community_households"] = None
+    result["property_fee"] = None
+    result["greening_rate"] = None
+    result["community_avg_price"] = None
+    result["renovation"] = None
+    result["floor_location"] = None
+    result["property_type"] = None
+    result["property_right"] = None
+    result["property_years"] = None
+    result["certificate_age"] = None
+    result["faces_south"] = 0
+    result["faces_north_south"] = 0
+    result["near_subway_text_flag"] = 0
+    result["parking_text_flag"] = 0
+    result["square_layout_text_flag"] = 0
+    result["many_followers_text_flag"] = 0
+    result["has_elevator_text_flag"] = 0
     return result[STANDARD_HOUSE_COLUMNS]
 
 
