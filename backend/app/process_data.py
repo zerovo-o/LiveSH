@@ -6,18 +6,20 @@ from pathlib import Path
 
 import pandas as pd
 import shapefile
-from sqlalchemy import delete, text
+from sqlalchemy import delete
 
 from .config import DATA_DIR
 from .database import Base, SessionLocal, engine
 from .geo import normalize_district, wgs84_to_gcj02
 from .metrics import (
     add_phase1_scores,
+    attach_life_circle_scores,
     attach_phase2_scores,
     attach_phase4_scores,
     build_demand_points,
     compute_e2sfca_house_features,
     compute_house_features,
+    compute_life_circle_house_features,
 )
 from .models import DistrictMetric, HouseListing, PoiCategoryMetric, PoiPoint, StreetMetric
 from .poi_taxonomy import add_poi_classification_columns, build_poi_subtype_audit
@@ -118,14 +120,36 @@ def assign_streets(rows: pd.DataFrame, streets: list[dict]) -> pd.DataFrame:
 
 STANDARD_HOUSE_COLUMNS = [
     "house_id",
+    "source",
+    "title",
     "district",
     "street",
-    "sub_district",
     "community_name",
-    "title",
-    "area",
     "price",
     "unit_price",
+    "area",
+    "room_count",
+    "hall_count",
+    "toilet_count",
+    "year_built",
+    "total_floors",
+    "community_households",
+    "property_fee",
+    "greening_rate",
+    "community_avg_price",
+    "renovation",
+    "floor_location",
+    "property_type",
+    "property_right",
+    "property_years",
+    "certificate_age",
+    "faces_south",
+    "faces_north_south",
+    "near_subway_text_flag",
+    "parking_text_flag",
+    "square_layout_text_flag",
+    "many_followers_text_flag",
+    "has_elevator_text_flag",
     "wgs84_lng",
     "wgs84_lat",
     "gcj02_lng",
@@ -136,49 +160,71 @@ STANDARD_HOUSE_COLUMNS = [
 def load_standard_house_rows(df: pd.DataFrame) -> pd.DataFrame:
     cols = [column for column in STANDARD_HOUSE_COLUMNS if column in df.columns]
     result = df[cols].copy()
+    for text_col, default in {
+        "source": "unknown",
+        "title": "",
+        "community_name": None,
+        "renovation": None,
+        "floor_location": None,
+        "property_type": None,
+        "property_right": None,
+        "property_years": None,
+        "certificate_age": None,
+    }.items():
+        if text_col not in result.columns:
+            result[text_col] = default
     if "street" not in result.columns:
         result["street"] = None
-    if "sub_district" not in result.columns:
-        result["sub_district"] = None
-    if "community_name" not in result.columns:
-        result["community_name"] = None
-    if "title" not in result.columns:
-        result["title"] = None
-    if "area" not in result.columns:
-        result["area"] = None
     if "is_valid_for_algorithm" in df.columns:
         result = result[df["is_valid_for_algorithm"].fillna(False).astype(bool)].copy()
     result = result.dropna(subset=["house_id", "district", "price", "unit_price", "wgs84_lng", "wgs84_lat", "gcj02_lng", "gcj02_lat"])
     result = result.drop_duplicates(subset=["house_id"])
     result["district"] = result["district"].map(normalize_district)
-    numeric_cols = ["price", "unit_price", "wgs84_lng", "wgs84_lat", "gcj02_lng", "gcj02_lat"]
+    numeric_cols = [
+        "price",
+        "unit_price",
+        "area",
+        "room_count",
+        "hall_count",
+        "toilet_count",
+        "year_built",
+        "total_floors",
+        "community_households",
+        "property_fee",
+        "greening_rate",
+        "community_avg_price",
+        "wgs84_lng",
+        "wgs84_lat",
+        "gcj02_lng",
+        "gcj02_lat",
+    ]
     for column in numeric_cols:
-        result[column] = pd.to_numeric(result[column], errors="coerce")
-    result["sub_district"] = result["sub_district"].fillna("").astype(str).str.strip().replace("", "未知")
-    result["community_name"] = result["community_name"].fillna("").astype(str).str.strip()
-    result["title"] = result["title"].fillna("").astype(str).str.strip()
-    result["area"] = pd.to_numeric(result["area"], errors="coerce")
-    result = result.dropna(subset=numeric_cols)
+        if column in result.columns:
+            result[column] = pd.to_numeric(result[column], errors="coerce")
+    required_numeric = ["price", "unit_price", "wgs84_lng", "wgs84_lat", "gcj02_lng", "gcj02_lat"]
+    result = result.dropna(subset=required_numeric)
+    flag_cols = [
+        "faces_south",
+        "faces_north_south",
+        "near_subway_text_flag",
+        "parking_text_flag",
+        "square_layout_text_flag",
+        "many_followers_text_flag",
+        "has_elevator_text_flag",
+    ]
+    for col in flag_cols:
+        if col in result.columns:
+            result[col] = result[col].fillna(False).astype(bool).astype(int)
+        else:
+            result[col] = 0
     return result[(result["wgs84_lng"].between(120.5, 122.2)) & (result["wgs84_lat"].between(30.5, 31.9))]
 
 
 def load_legacy_house_rows(df: pd.DataFrame) -> pd.DataFrame:
-    cols = [
-        "house_id",
-        "district",
-        "sub_district",
-        "community_name",
-        "title",
-        "area",
-        "listing_total_price",
-        "listing_unit_price",
-        "longitude",
-        "latitude",
-    ]
-    missing = set(["house_id", "district", "listing_total_price", "listing_unit_price", "longitude", "latitude"]) - set(df.columns)
+    cols = ["house_id", "district", "listing_total_price", "listing_unit_price", "longitude", "latitude"]
+    missing = set(cols) - set(df.columns)
     if missing:
         raise ValueError(f"house data missing required columns: {sorted(missing)}")
-    cols = [c for c in cols if c in df.columns]
     result = df[cols].rename(
         columns={
             "listing_total_price": "price",
@@ -187,26 +233,41 @@ def load_legacy_house_rows(df: pd.DataFrame) -> pd.DataFrame:
             "latitude": "wgs84_lat",
         }
     )
-    if "sub_district" not in result.columns:
-        result["sub_district"] = None
-    if "community_name" not in result.columns:
-        result["community_name"] = None
-    if "title" not in result.columns:
-        result["title"] = None
-    if "area" not in result.columns:
-        result["area"] = None
     result = result.dropna(subset=["district", "price", "unit_price", "wgs84_lng", "wgs84_lat"])
     result = result.drop_duplicates(subset=["house_id"])
     result["district"] = result["district"].map(normalize_district)
-    result["sub_district"] = result["sub_district"].fillna("").astype(str).str.strip().replace("", "未知")
-    result["community_name"] = result["community_name"].fillna("").astype(str).str.strip()
-    result["title"] = result["title"].fillna("").astype(str).str.strip()
-    result["area"] = pd.to_numeric(result["area"], errors="coerce")
     result = result[(result["wgs84_lng"].between(120.5, 122.2)) & (result["wgs84_lat"].between(30.5, 31.9))]
     gcj = result.apply(lambda r: wgs84_to_gcj02(float(r["wgs84_lng"]), float(r["wgs84_lat"])), axis=1)
     result["gcj02_lng"] = [item[0] for item in gcj]
     result["gcj02_lat"] = [item[1] for item in gcj]
     result["street"] = None
+    # Backfill extended columns for legacy datasets.
+    result["source"] = "legacy"
+    result["title"] = ""
+    result["community_name"] = None
+    result["area"] = None
+    result["room_count"] = None
+    result["hall_count"] = None
+    result["toilet_count"] = None
+    result["year_built"] = None
+    result["total_floors"] = None
+    result["community_households"] = None
+    result["property_fee"] = None
+    result["greening_rate"] = None
+    result["community_avg_price"] = None
+    result["renovation"] = None
+    result["floor_location"] = None
+    result["property_type"] = None
+    result["property_right"] = None
+    result["property_years"] = None
+    result["certificate_age"] = None
+    result["faces_south"] = 0
+    result["faces_north_south"] = 0
+    result["near_subway_text_flag"] = 0
+    result["parking_text_flag"] = 0
+    result["square_layout_text_flag"] = 0
+    result["many_followers_text_flag"] = 0
+    result["has_elevator_text_flag"] = 0
     return result[STANDARD_HOUSE_COLUMNS]
 
 
@@ -248,7 +309,6 @@ def iter_poi_rows(raw_dir: Path):
                 "category": category,
                 "source": source,
                 "district": district,
-                "street": None,
                 "tag": str(row.get("tag") or ""),
                 "wgs84_lng": float(wgs_lng) if wgs_lng not in (None, "") else None,
                 "wgs84_lat": float(wgs_lat) if wgs_lat not in (None, "") else None,
@@ -338,29 +398,9 @@ def build_street_metrics(houses: pd.DataFrame, pois: pd.DataFrame) -> pd.DataFra
     return add_phase1_scores(metrics)
 
 
-def _ensure_house_listing_columns() -> None:
-    required_columns = {
-        "street": "VARCHAR(64)",
-        "sub_district": "VARCHAR(64)",
-        "community_name": "VARCHAR(120)",
-        "title": "VARCHAR(240)",
-        "area": "FLOAT",
-    }
-    with engine.begin() as conn:
-        if engine.dialect.name != "sqlite":
-            return
-        table_info = conn.execute(text("PRAGMA table_info('house_listings')")).fetchall()
-        existing = {row[1] for row in table_info}
-        for column, col_type in required_columns.items():
-            if column not in existing:
-                conn.execute(text(f"ALTER TABLE house_listings ADD COLUMN {column} {col_type}"))
-
-
 def ingest(data_dir: Path = DATA_DIR, house_path: Path | None = None) -> None:
     Base.metadata.drop_all(bind=engine)
     Base.metadata.create_all(bind=engine)
-    _ensure_house_listing_columns()
-
     street_shapes = load_street_shapes(data_dir / "sh_street_boundary" / "shanghai_street_boundary.shp")
     resolved_house_path = house_path or data_dir / "sh_house_dataset_raw.parquet"
     houses = load_house_rows(resolved_house_path)
@@ -368,22 +408,20 @@ def ingest(data_dir: Path = DATA_DIR, house_path: Path | None = None) -> None:
     pois = add_poi_classification_columns(pois)
     if houses["street"].isna().any():
         houses = assign_streets(houses, street_shapes)
-    houses["sub_district"] = houses["sub_district"].where(houses["sub_district"].notna(), houses["street"])
-    houses["sub_district"] = houses["sub_district"].fillna("未知")
     pois = assign_streets(pois, street_shapes)
     metrics, category_counts = build_metrics(houses, pois)
     street_metrics = build_street_metrics(houses, pois)
     house_features = compute_house_features(houses, pois)
     demand_points = build_demand_points(houses, pois)
     phase4_house_features = compute_e2sfca_house_features(house_features, demand_points, pois)
-
+    life_circle_house_features = compute_life_circle_house_features(houses, pois)
     derived_dir = data_dir / "derived"
     derived_dir.mkdir(parents=True, exist_ok=True)
     house_features.to_parquet(derived_dir / "house_features_current.parquet", index=False)
     demand_points.to_parquet(derived_dir / "demand_points_current.parquet", index=False)
     phase4_house_features.to_parquet(derived_dir / "house_features_phase4_current.parquet", index=False)
+    life_circle_house_features.to_parquet(derived_dir / "house_life_circle_features_current.parquet", index=False)
     build_poi_subtype_audit(pois).to_csv(derived_dir / "poi_subtype_audit.csv", index=False)
-
     metrics = attach_phase2_scores(metrics, house_features, ["district"])
     street_metrics = attach_phase2_scores(street_metrics, house_features, ["district", "street"])
     metrics = attach_phase4_scores(metrics, phase4_house_features, ["district"], reliability_house_threshold=50)
@@ -393,6 +431,21 @@ def ingest(data_dir: Path = DATA_DIR, house_path: Path | None = None) -> None:
         ["district", "street"],
         reliability_house_threshold=10,
     )
+    metrics = attach_life_circle_scores(metrics, life_circle_house_features, ["district"])
+    street_metrics = attach_life_circle_scores(street_metrics, life_circle_house_features, ["district", "street"])
+    street_metrics[
+        [
+            "district",
+            "street",
+            "house_count",
+            "calibrated_score",
+            "calibrated_score_life_circle",
+            "life_circle_score",
+            "life_circle_5min_score",
+            "life_circle_10min_score",
+            "life_circle_15min_score",
+        ]
+    ].to_csv(derived_dir / "life_circle_street_comparison.csv", index=False)
 
     with SessionLocal.begin() as db:
         for table in [HouseListing, PoiPoint, DistrictMetric, StreetMetric, PoiCategoryMetric]:
