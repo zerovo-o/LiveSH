@@ -44,6 +44,7 @@ export type CommunityRecommendation = {
   avg_total_price: number;
   house_count: number;
   house_ids: string[];
+  house_feature_tags: Record<string, string[]>;
   poi_score: number;
   traffic_score: number;
   budget_match_score: number;

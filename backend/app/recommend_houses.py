@@ -272,6 +272,80 @@ def _build_community_quality_score(row: HouseListing) -> float:
     return _clamp(0.40 * green_score + 0.30 * fee_score + 0.30 * household_score)
 
 
+def _safe_int(value: object, default: int = 0) -> int:
+    try:
+        if value is None:
+            return default
+        return int(float(value))
+    except (TypeError, ValueError):
+        return default
+
+
+def _safe_float(value: object, default: float | None = None) -> float | None:
+    try:
+        if value is None:
+            return default
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _format_layout_tag(row: HouseListing) -> str | None:
+    room = _safe_int(getattr(row, "room_count", None), 0)
+    hall = _safe_int(getattr(row, "hall_count", None), 0)
+    if room <= 0:
+        return None
+    hall = max(hall, 0)
+    return f"{room}室{hall}厅"
+
+
+def _orientation_tag(row: HouseListing) -> str | None:
+    ns = _safe_int(getattr(row, "faces_north_south", None), 0)
+    south = _safe_int(getattr(row, "faces_south", None), 0)
+    if ns > 0:
+        return "南北通透"
+    if south > 0:
+        return "朝南"
+    return None
+
+
+def _renovation_tag(row: HouseListing) -> str | None:
+    text = str(getattr(row, "renovation", "") or "").strip()
+    return text or None
+
+
+def _build_house_tags(row: HouseListing) -> list[str]:
+    tags: list[str] = []
+    layout = _format_layout_tag(row)
+    if layout:
+        tags.append(layout)
+    orient = _orientation_tag(row)
+    if orient:
+        tags.append(orient)
+    if _safe_int(getattr(row, "near_subway_text_flag", None), 0) > 0:
+        tags.append("近地铁")
+    if _safe_int(getattr(row, "has_elevator_text_flag", None), 0) > 0:
+        tags.append("有电梯")
+    renovation = _renovation_tag(row)
+    if renovation:
+        tags.append(renovation)
+    return tags
+
+
+def _house_explain_features(row: HouseListing) -> dict[str, object]:
+    return {
+        "layout": _format_layout_tag(row),
+        "area_sqm": round(float(_get_house_area(row)), 2) if _get_house_area(row) is not None else None,
+        "orientation": _orientation_tag(row),
+        "has_elevator": bool(_safe_int(getattr(row, "has_elevator_text_flag", None), 0) > 0),
+        "near_subway": bool(_safe_int(getattr(row, "near_subway_text_flag", None), 0) > 0),
+        "renovation": _renovation_tag(row),
+        "year_built": _safe_int(getattr(row, "year_built", None), 0) or None,
+        "property_fee": _safe_float(getattr(row, "property_fee", None), None),
+        "greening_rate": _safe_float(getattr(row, "greening_rate", None), None),
+    }
+
+
 def _weight_inputs(payload: HouseRecommendRequest) -> tuple[float, float]:
     shopping = payload.shopping_weight if payload.shopping_weight > 0 else payload.daily_life_weight
     healthcare = payload.healthcare_weight if payload.healthcare_weight > 0 else payload.medical_weight
@@ -472,6 +546,7 @@ def _build_house_llm_rows(candidates: list[HouseCandidate], max_items: int) -> l
                 "layout_score": round(item.layout_score, 4),
                 "comfort_score": round(item.comfort_score, 4),
                 "community_quality_score": round(item.community_quality_score, 4),
+                "house_features": _house_explain_features(item.model),
                 "rule_score": round(item.rule_score, 4),
             }
         )
@@ -479,6 +554,7 @@ def _build_house_llm_rows(candidates: list[HouseCandidate], max_items: int) -> l
 
 
 def _apply_house_llm_rerank(payload: HouseRecommendRequest, affordable_unit_price: float, candidates: list[HouseCandidate]) -> dict[str, int | str | bool]:
+    pre_top_ids = [str(item.model.house_id or item.model.id) for item in sorted(candidates, key=lambda x: x.rule_score, reverse=True)[:5]]
     rows = _build_house_llm_rows(candidates, payload.max_route_calls)
     result = rerank_house_candidates(
         work_address=payload.work_address,
@@ -505,12 +581,15 @@ def _apply_house_llm_rerank(payload: HouseRecommendRequest, affordable_unit_pric
     for item in candidates:
         if item.final_score <= 0:
             item.final_score = item.rule_score
+    post_top_ids = [str(item.model.house_id or item.model.id) for item in sorted(candidates, key=lambda x: x.final_score, reverse=True)[:5]]
+    topk_change_count = len(set(pre_top_ids) ^ set(post_top_ids))
     return {
         "house_rerank_applied": result.applied,
         "house_rerank_latency_ms": result.latency_ms,
         "house_rerank_candidates": len(rows),
         "house_rerank_success_count": hits,
         "house_rerank_error": result.error or "",
+        "house_rerank_top5_change_count": topk_change_count,
     }
 
 
@@ -788,6 +867,7 @@ def recommend_houses(payload: HouseRecommendRequest, db: Session) -> HouseRecomm
         )
 
     house_ids_by_community: dict[str, list[str]] = {item.community_id: [] for item in top_communities}
+    house_tags_by_community: dict[str, dict[str, list[str]]] = {item.community_id: {} for item in top_communities}
     for item in sorted(candidates, key=lambda x: x.final_score, reverse=True):
         community_id = f"{item.district}|{item.sub_district}|{item.community_name}"
         if community_id not in allowed_communities:
@@ -795,9 +875,32 @@ def recommend_houses(payload: HouseRecommendRequest, db: Session) -> HouseRecomm
         existing_count = len(house_ids_by_community.get(community_id, []))
         if existing_count >= payload.top_houses_per_community:
             continue
-        house_ids_by_community[community_id].append(str(item.model.house_id or item.model.id))
+        hid = str(item.model.house_id or item.model.id)
+        house_ids_by_community[community_id].append(hid)
+        house_tags_by_community[community_id][hid] = _build_house_tags(item.model)
 
     community_house_ids = {item.community_id: house_ids_by_community.get(item.community_id, []) for item in top_communities}
+    community_house_tags = {item.community_id: house_tags_by_community.get(item.community_id, {}) for item in top_communities}
+
+    returned_items: list[HouseCandidate] = []
+    selected_pairs = {(cid, hid) for cid, ids in house_ids_by_community.items() for hid in ids}
+    for item in candidates:
+        cid = f"{item.district}|{item.sub_district}|{item.community_name}"
+        hid = str(item.model.house_id or item.model.id)
+        if (cid, hid) in selected_pairs:
+            returned_items.append(item)
+
+    returned_count = len(returned_items)
+    elevator_hits = sum(1 for i in returned_items if _safe_int(getattr(i.model, "has_elevator_text_flag", None), 0) > 0)
+    subway_hits = sum(1 for i in returned_items if _safe_int(getattr(i.model, "near_subway_text_flag", None), 0) > 0)
+    elevator_hit_rate = elevator_hits / returned_count if returned_count else 0.0
+    subway_hit_rate = subway_hits / returned_count if returned_count else 0.0
+    preference_consistency = _clamp(
+        0.35 * (mean(i.budget_score for i in returned_items) if returned_items else 0.0)
+        + 0.30 * (mean(i.commute_score for i in returned_items) if returned_items else 0.0)
+        + 0.20 * (mean(i.poi_subtype_score for i in returned_items) if returned_items else 0.0)
+        + 0.15 * (mean(i.layout_score for i in returned_items) if returned_items else 0.0)
+    )
 
     summary: dict[str, float | int | str | bool | None] = {
         "feature_version_used": version,
@@ -813,6 +916,10 @@ def recommend_houses(payload: HouseRecommendRequest, db: Session) -> HouseRecomm
         "house_rerank_success_count": house_rerank_diag["house_rerank_success_count"],
         "house_rerank_latency_ms": house_rerank_diag["house_rerank_latency_ms"],
         "house_rerank_error": house_rerank_diag["house_rerank_error"],
+        "house_rerank_top5_change_count": int(house_rerank_diag.get("house_rerank_top5_change_count", 0)),
+        "constraint_hit_rate_elevator": round(elevator_hit_rate, 4),
+        "constraint_hit_rate_near_subway": round(subway_hit_rate, 4),
+        "preference_consistency_score": round(preference_consistency, 4),
         "community_rerank_applied": community_rerank_diag["community_rerank_applied"],
         "community_rerank_candidates": community_rerank_diag["community_rerank_candidates"],
         "community_rerank_success_count": community_rerank_diag["community_rerank_success_count"],
@@ -836,7 +943,18 @@ def recommend_houses(payload: HouseRecommendRequest, db: Session) -> HouseRecomm
         work_location=work_location_str,
         streets=top_streets,
         communities=[
-            community.model_copy(update={"house_ids": community_house_ids.get(f"{community.district}|{community.sub_district}|{community.community_name}", [])})
+            community.model_copy(
+                update={
+                    "house_ids": community_house_ids.get(
+                        f"{community.district}|{community.sub_district}|{community.community_name}",
+                        [],
+                    ),
+                    "house_feature_tags": community_house_tags.get(
+                        f"{community.district}|{community.sub_district}|{community.community_name}",
+                        {},
+                    ),
+                }
+            )
             for community in community_rows
         ],
         summary=summary,
