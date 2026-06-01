@@ -158,7 +158,13 @@ export default function PersonalizedAgentPanel() {
 
         {result?.summary ? (
           <div className="rounded-lg border border-[#f3e1cb] bg-white/80 p-3 text-xs text-[#775f4d]">
-            候选房源：{String(result.summary.candidate_houses ?? 0)}；路线调用：{String(result.summary.route_calls ?? 0)}；小区 LLM 重排：{String(result.summary.community_rerank_applied ?? false)}
+            候选房源：{String(result.summary.candidate_houses ?? 0)}；
+            路线调用：{String(result.summary.route_calls ?? 0)}；
+            小区 LLM 重排：{String(result.summary.community_rerank_applied ?? false)}；
+            电梯命中率：{Math.round(Number(result.summary.constraint_hit_rate_elevator ?? 0) * 100)}%；
+            近地铁命中率：{Math.round(Number(result.summary.constraint_hit_rate_near_subway ?? 0) * 100)}%；
+            偏好一致性：{Math.round(Number(result.summary.preference_consistency_score ?? 0) * 100)}；
+            Top5变化：{String(result.summary.house_rerank_top5_change_count ?? 0)}
           </div>
         ) : null}
 
@@ -225,11 +231,27 @@ function CommunityCard({
         <div className="rounded-md border border-[#ecdcc6] bg-white/80 p-2 text-[11px] text-[#6e5543]">
           <div className="font-medium text-[#33251f]">房源 ID</div>
           <div className="mt-1 flex flex-wrap gap-2">
-            {community.house_ids.length > 0 ? community.house_ids.map((houseId) => (
-              <Badge key={houseId} variant="outline" className="border-[#e3c9a6] text-[#8c5b2e]">
-                {houseId}
-              </Badge>
-            )) : <span>暂无</span>}
+            {community.house_ids.length > 0
+              ? community.house_ids.map((houseId) => {
+                  const tags = community.house_feature_tags?.[houseId] ?? [];
+                  return (
+                    <div key={houseId} className="rounded-md border border-[#ead8c2] bg-[#fff9ef] px-2 py-1">
+                      <div className="text-[11px] font-medium text-[#8c5b2e]">{houseId}</div>
+                      <div className="mt-1 flex flex-wrap gap-1">
+                        {tags.length > 0 ? (
+                          tags.map((tag) => (
+                            <Badge key={`${houseId}-${tag}`} variant="outline" className="border-[#d9c5a3] px-1.5 py-0 text-[10px] text-[#6e5543]">
+                              {tag}
+                            </Badge>
+                          ))
+                        ) : (
+                          <span className="text-[10px] text-[#9b7d66]">暂无标签</span>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })
+              : <span>暂无</span>}
           </div>
         </div>
       </CardContent>

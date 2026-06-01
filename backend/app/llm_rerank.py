@@ -113,12 +113,15 @@ def _rerank_common(
         return RerankResult(applied=False, items={}, latency_ms=0, error="empty_candidates")
 
     system_prompt = (
-        "你是上海住房推荐评估助手。你只能做软重排，不可推翻规则分。"
+        "你是上海住房推荐顾问，只做候选软重排，不得推翻规则分。"
+        "你必须比较候选之间的相对匹配度，解释为什么某个房源/小区比另一个更匹配用户偏好。"
         "请仅返回严格 JSON，格式："
         "{\"items\":[{\""
         + id_key
         + "\":\"...\",\"llm_score\":0.0,\"confidence\":0.0,\"reason\":\"...\"}]}"
-        "llm_score 和 confidence 范围必须在 [0,1]。reason 20-60 中文字。"
+        "llm_score 与 confidence 必须在 [0,1]。"
+        "reason 必须包含四段，按此顺序输出："
+        "【优势】...【短板】...【适配人群】...【风险点】..."
     )
     user_payload = {
         "task": task_name,
@@ -128,7 +131,7 @@ def _rerank_common(
             "output_json_only": True,
             "score_range": [0, 1],
             "confidence_range": [0, 1],
-            "reason_length_hint": "20-60 Chinese chars",
+            "reason_length_hint": "80-180 Chinese chars, include four labeled sections",
         },
     }
     body = {
@@ -199,4 +202,3 @@ def rerank_community_candidates(
         context=context,
         candidates=candidates,
     )
-
