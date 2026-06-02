@@ -89,7 +89,7 @@ const radarFields: { key: MetricKey; label: string; inverse?: boolean }[] = [
 
 const selectedDependentChartIds = new Set([
   "priceTop10", "scoreRanking", "quadrant", "groupedPoi", "poiStack",
-  "radar", "accessValue", "perHouse", "scoreModelCompare", "lifeCircleCompare",
+  "radar", "accessValue", "perHouse", "lifeCircleCompare",
   "sampleReliability", "scoreComponent", "districtClustering", "districtSimilarity",
   "supplyDemand", "commutePrice", "scoreWaterfall", "lifeCircleHeatmap"
 ]);
@@ -217,7 +217,7 @@ const ChartsPanel = memo(function ChartsPanel({
     const avgPrice = average(scatter, "avg_price");
     const avgActivity = average(scatter, "business_activity");
     return {
-      grid: { top: 24, left: 54, right: 22, bottom: 46 },
+      grid: { top: 24, left: 54, right: 60, bottom: 46 },
       tooltip: {
         formatter: (params: unknown) => {
           const data = readPointTooltipData(params);
@@ -297,7 +297,7 @@ const ChartsPanel = memo(function ChartsPanel({
     const clusterNames = ["核心便利区", "均衡宜居区", "实惠潜力区", "价值洼地区"];
     const clusterProfile = labels.map((c) => clusterNames[c]);
     return {
-      grid: { top: 24, left: 54, right: 22, bottom: 46 },
+      grid: { top: 24, left: 54, right: 36, bottom: 46 },
       tooltip: {
         formatter: (params: unknown) => {
           const idx = readNumericField(params, "dataIndex");
@@ -453,7 +453,7 @@ const ChartsPanel = memo(function ChartsPanel({
 
   // ==================== MODULE 3: 关系与网络 ====================
   const accessValueOption = useMemo<EChartsOption>(() => ({
-    grid: { top: 24, left: 58, right: 22, bottom: 46 },
+    grid: { top: 24, left: 58, right: 90, bottom: 46 },
     tooltip: {
       formatter: (params: unknown) => {
         const data = readPointTooltipData(params);
@@ -589,7 +589,7 @@ const ChartsPanel = memo(function ChartsPanel({
       return { label: cat.label, value: Number(diff.toFixed(1)) };
     });
     return {
-      grid: { top: 20, left: 50, right: 40, bottom: 24 },
+      grid: { top: 20, left: 50, right: 88, bottom: 24 },
       tooltip: {
         trigger: "axis",
         formatter: (params: unknown) => {
@@ -639,7 +639,7 @@ const ChartsPanel = memo(function ChartsPanel({
     const slope = den ? num / den : 0;
     const intercept = yMean - slope * xMean;
     return {
-      grid: { top: 24, left: 58, right: 22, bottom: 46 },
+      grid: { top: 24, left: 68, right: 94, bottom: 46 },
       tooltip: {
         formatter: (params: unknown) => {
           const p = params as any;
@@ -670,28 +670,6 @@ const ChartsPanel = memo(function ChartsPanel({
   }, [scatter, selectedDistrict]);
 
   // ==================== MODULE 4: 评分模型 ====================
-  const scoreModelCompareOption = useMemo<EChartsOption>(() => {
-    const city = buildAverageMetric(scatter);
-    const selected = selectedMetric ?? city;
-    const fields = [
-      { key: "livability_score" as const, label: "宜居分v1" },
-      { key: "livability_score_v2" as const, label: "宜居分v2" },
-      { key: "calibrated_score" as const, label: "校准分" },
-      { key: "calibrated_score_life_circle" as const, label: "校准+生活圈" }
-    ];
-    return {
-      grid: { top: 38, left: 50, right: 18, bottom: 46 },
-      tooltip: { trigger: "axis" },
-      legend: { top: 0, textStyle: axisText },
-      xAxis: { type: "category", data: fields.map((f) => f.label), axisLabel: axisText },
-      yAxis: { type: "value", axisLabel: axisText },
-      series: [
-        { name: selected.district, type: "bar", barMaxWidth: 20, data: fields.map((f) => Number(Number(selected[f.key]).toFixed(4))), itemStyle: { color: palette.primary } },
-        { name: "全市均值", type: "bar", barMaxWidth: 20, data: fields.map((f) => Number(Number(city[f.key]).toFixed(4))), itemStyle: { color: "#d8c4aa" } }
-      ]
-    };
-  }, [scatter, selectedMetric]);
-
   const lifeCircleCompareOption = useMemo<EChartsOption>(() => {
     const city = buildAverageMetric(scatter);
     const selected = selectedMetric ?? city;
@@ -943,9 +921,6 @@ const ChartsPanel = memo(function ChartsPanel({
           avg_price: Math.round(d.avg_price)
         }))
       },
-      scoreModelCompare: {
-        selected: scoreModelSnapshot(selected), city_average: scoreModelSnapshot(cityMetric)
-      },
       lifeCircleCompare: {
         selected: lifeCircleSnapshot(selected), city_average: lifeCircleSnapshot(cityMetric)
       },
@@ -1048,8 +1023,8 @@ const ChartsPanel = memo(function ChartsPanel({
               <ChartCard chartId="districtSimilarity" title="区域相似度网络图" desc="基于20维特征余弦相似度+力导向布局。节点颜色=房价，连边=相似度>0.6。" insightData={chartInsightData.districtSimilarity} insight={insights.districtSimilarity} loading={insightLoading.districtSimilarity} error={insightErrors.districtSimilarity} onInsight={loadChartInsight}>
                 <EChart option={districtSimilarityOption} className="h-[32rem] w-full" />
               </ChartCard>
-              <ChartCard chartId="supplyDemand" title="设施供需偏差" desc="选中区每套房设施供给量 vs 全市中位数的偏离百分比。绿色向右=高于中位数，红色向左=低于中位数。" insightData={chartInsightData.supplyDemand} insight={insights.supplyDemand} loading={insightLoading.supplyDemand} error={insightErrors.supplyDemand} onInsight={loadChartInsight}>
-                <EChart option={supplyDemandOption} className="h-72 w-full" />
+              <ChartCard chartId="supplyDemand" title={`设施供需偏差（当前区：${selectedDistrict ?? "全市均值"}）`} desc="选中区每套房设施供给量 vs 全市中位数的偏离百分比。绿色向右=高于中位数，红色向左=低于中位数。" insightData={chartInsightData.supplyDemand} insight={insights.supplyDemand} loading={insightLoading.supplyDemand} error={insightErrors.supplyDemand} onInsight={loadChartInsight}>
+                <EChart option={supplyDemandOption} className="h-80 w-full" />
               </ChartCard>
               <ChartCard chartId="commutePrice" title="通勤距离-房价梯度" desc="各区最近交通距离与均价的关系，虚线为线性趋势。越靠左下越'近且便宜'。" insightData={chartInsightData.commutePrice} insight={insights.commutePrice} loading={insightLoading.commutePrice} error={insightErrors.commutePrice} onInsight={loadChartInsight}>
                 <EChart option={commutePriceOption} className="h-80 w-full" onClick={handleChartClick} />
@@ -1059,9 +1034,6 @@ const ChartsPanel = memo(function ChartsPanel({
 
           {activeModule === "model" ? (
             <div className="grid grid-cols-1 gap-4">
-              <ChartCard chartId="scoreModelCompare" title="评分体系迭代对比" desc="对比不同阶段评分模型在选中区域的表现差异。" insightData={chartInsightData.scoreModelCompare} insight={insights.scoreModelCompare} loading={insightLoading.scoreModelCompare} error={insightErrors.scoreModelCompare} onInsight={loadChartInsight}>
-                <EChart option={scoreModelCompareOption} className="h-80 w-full" />
-              </ChartCard>
               <ChartCard chartId="lifeCircleCompare" title="生活圈覆盖率对比" desc="5/10/15分钟生活圈覆盖率，对比选中区域与全市均值。" insightData={chartInsightData.lifeCircleCompare} insight={insights.lifeCircleCompare} loading={insightLoading.lifeCircleCompare} error={insightErrors.lifeCircleCompare} onInsight={loadChartInsight}>
                 <EChart option={lifeCircleCompareOption} className="h-80 w-full" />
               </ChartCard>
@@ -1102,7 +1074,7 @@ function ChartCard({ title, children, desc, chartId, insightData, scope,
   };
   useEffect(() => { if (loading || insight || error) setInsightOpen(true); }, [error, insight, loading]);
   return (
-    <Card className="shrink-0 rounded-[18px] border-[#f1dfc9] bg-[#fffdf8]/92 shadow-[0_12px_34px_rgba(104,72,42,0.08)]">
+    <Card className="shrink-0 overflow-visible rounded-[18px] border-[#f1dfc9] bg-[#fffdf8]/92 shadow-[0_12px_34px_rgba(104,72,42,0.08)]">
       <CardHeader className="pb-2">
         <CardTitle className="text-base font-black text-[#3c2a20]">{title}</CardTitle>
         {desc ? <p className="mt-1 text-sm text-[#6b5345]">{desc}</p> : null}
@@ -1225,16 +1197,6 @@ function metricSnapshot(metric: DistrictMetric) {
     e2sfca_access_score: Number(metric.e2sfca_access_score.toFixed(3)),
     calibrated_score: Number(metric.calibrated_score.toFixed(3)),
     calibrated_score_life_circle: Number(metric.calibrated_score_life_circle.toFixed(3))
-  };
-}
-
-function scoreModelSnapshot(metric: DistrictMetric) {
-  return {
-    district: metric.district,
-    livability_score: Number(metric.livability_score.toFixed(4)),
-    livability_score_v2: Number(metric.livability_score_v2.toFixed(4)),
-    calibrated_score: Number(metric.calibrated_score.toFixed(4)),
-    calibrated_score_life_circle: Number(metric.calibrated_score_life_circle.toFixed(4))
   };
 }
 
