@@ -8,7 +8,7 @@ import StreetPanel from "./components/StreetPanel";
 import { Button } from "./components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "./components/ui/card";
 import { Badge } from "./components/ui/badge";
-import { formatPrice, formatScore } from "./lib/utils";
+import { displayScore, formatPrice, formatScore } from "./lib/utils";
 import type { DistrictMetric, Summary } from "./types/metrics";
 import "./index.css";
 
@@ -34,7 +34,7 @@ function App() {
             : null
       );
     } catch {
-      setError("后端 API 不可用。请先运行数据入库脚本并启动 FastAPI。");
+      setError("后端 API 不可用。请确认 FastAPI 已在 8000 端口启动，并读取现有 livability.db。");
     } finally {
       setLoading(false);
     }
@@ -67,7 +67,7 @@ function App() {
             数据服务未就绪
           </div>
           <p className="mt-3 text-sm leading-6 text-slate-600">{error}</p>
-          <pre className="mt-4 rounded-lg bg-slate-950 p-3 text-xs text-slate-100">cd backend{"\n"}python3 -m app.process_data{"\n"}uvicorn app.main:app --reload</pre>
+          <pre className="mt-4 rounded-lg bg-slate-950 p-3 text-xs text-slate-100">cd backend{"\n"}..\venv\Scripts\python.exe -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload</pre>
           <Button className="mt-4" onClick={load}>
             重试
           </Button>
@@ -105,7 +105,7 @@ function App() {
               </div>
               <div className="space-y-3 text-base leading-7 text-[#6e5543]">
                 <p>稳健评分综合服务供需比、POI 多样性与房价负担</p>
-                <p>供需可达性衡量设施供给覆盖周边居住需求的能力</p>
+                <p>设施供需充足度衡量设施供给覆盖周边居住需求的能力</p>
                 <p>校准评分作为默认推荐依据，并按样本可信度对排名降权</p>
               </div>
               <div className="mx-auto mt-8 flex max-w-2xl flex-wrap justify-center gap-4 text-2xl font-black md:text-4xl">
@@ -200,7 +200,7 @@ function RecommendationSection({
                 <span>
                   {index + 1}. {item.district}
                 </span>
-                <Badge className="shrink-0 bg-[#33a985] text-white">评分 {formatScore(item.calibrated_score_life_circle)}</Badge>
+                <Badge className="shrink-0 bg-[#33a985] text-white">评分 {formatScore(displayScore(item, "calibrated_score_life_circle"))}</Badge>
               </CardTitle>
             </CardHeader>
             <CardContent>

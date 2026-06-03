@@ -122,6 +122,7 @@ STANDARD_HOUSE_COLUMNS = [
     "house_id",
     "district",
     "street",
+    "community_name",
     "price",
     "unit_price",
     "wgs84_lng",
@@ -136,6 +137,8 @@ def load_standard_house_rows(df: pd.DataFrame) -> pd.DataFrame:
     result = df[cols].copy()
     if "street" not in result.columns:
         result["street"] = None
+    if "community_name" not in result.columns:
+        result["community_name"] = None
     if "is_valid_for_algorithm" in df.columns:
         result = result[df["is_valid_for_algorithm"].fillna(False).astype(bool)].copy()
     result = result.dropna(subset=["house_id", "district", "price", "unit_price", "wgs84_lng", "wgs84_lat", "gcj02_lng", "gcj02_lat"])
@@ -169,6 +172,7 @@ def load_legacy_house_rows(df: pd.DataFrame) -> pd.DataFrame:
     result["gcj02_lng"] = [item[0] for item in gcj]
     result["gcj02_lat"] = [item[1] for item in gcj]
     result["street"] = None
+    result["community_name"] = None
     return result[STANDARD_HOUSE_COLUMNS]
 
 
