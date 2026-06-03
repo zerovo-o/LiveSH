@@ -4,6 +4,7 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Loader2, Sparkles, X } from "lucide-react";
 import EChart from "./charts/EChart";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
+import { displayScore, formatScore, scoreColor as displayScoreColor } from "../lib/utils";
 import type { ChartInsight, DistrictMetric, PoiCategory } from "../types/metrics";
 
 type ModuleId = "market" | "poi" | "relation" | "model";
@@ -55,6 +56,24 @@ const palette = {
   dark: "#2f241c"
 };
 const selectedColor = palette.dark;
+
+const displayScoreKeys = new Set<keyof DistrictMetric>([
+  "livability_score",
+  "livability_score_v2",
+  "affordability_score",
+  "service_score",
+  "vitality_score",
+  "access_score",
+  "value_score",
+  "e2sfca_access_score",
+  "e2sfca_value_score",
+  "calibrated_score",
+  "life_circle_5min_score",
+  "life_circle_10min_score",
+  "life_circle_15min_score",
+  "life_circle_score",
+  "calibrated_score_life_circle"
+]);
 
 const relationMetrics: { key: MetricKey; label: string }[] = [
   { key: "avg_price", label: "房价" },
@@ -207,8 +226,12 @@ const ChartsPanel = memo(function ChartsPanel({
     series: [{
       type: "bar", barMaxWidth: 18,
       data: scoreRanking.map((d) => ({
-        name: d.district, value: Number(d.calibrated_score_life_circle.toFixed(3)),
-        itemStyle: { color: d.district === selectedDistrict ? selectedColor : scoreColor(d.calibrated_score_life_circle) }
+        name: d.district, value: Number(formatScore(displayScore(d, "calibrated_score_life_circle"))),
+        itemStyle: {
+          color: d.district === selectedDistrict
+            ? selectedColor
+            : displayScoreColor(displayScore(d, "calibrated_score_life_circle"))
+        }
       }))
     }]
   }), [scoreRanking, selectedDistrict]);
@@ -389,7 +412,7 @@ const ChartsPanel = memo(function ChartsPanel({
     const ranges = buildRanges(scatter, radarFields.map((field) => field.key));
     const toRadar = (metric: DistrictMetric) =>
       radarFields.map((field) => {
-        const value = normalize(Number(metric[field.key]), ranges[field.key]);
+        const value = normalize(chartMetricValue(metric, field.key), ranges[field.key]);
         return Number((field.inverse ? 1 - value : value).toFixed(3));
       });
     // Find a comparison district (second-highest scored)
@@ -441,7 +464,7 @@ const ChartsPanel = memo(function ChartsPanel({
       visualMap: {
         min: 0, max: 1, right: 6, top: "middle", calculable: false, textStyle: axisText,
         inRange: { color: ["#fee2e2", "#fef3c7", "#dcfce7", "#15803d"] },
-        formatter: (v: number) => `${(v * 100).toFixed(0)}%`
+        formatter: (v: unknown) => `${(Number(v) * 100).toFixed(0)}%`
       },
       series: [{
         type: "heatmap", data,
@@ -464,11 +487,19 @@ const ChartsPanel = memo(function ChartsPanel({
     yAxis: { type: "value", name: "供需可达性分", nameTextStyle: axisText, axisLabel: axisText },
     series: [{
       type: "scatter",
-      symbolSize: (value: number[]) => Math.max(10, Math.min(32, (value[2] + 0.5) * 28)),
+      symbolSize: (value: number[]) => Math.max(10, Math.min(32, (value[2] - 3) * 4)),
       data: scatter.map((d) => ({
         name: d.district,
-        value: [d.avg_price, d.e2sfca_access_score, d.calibrated_score_life_circle],
-        itemStyle: { color: d.district === selectedDistrict ? selectedColor : scoreColor(d.calibrated_score_life_circle) }
+        value: [
+          d.avg_price,
+          displayScore(d, "e2sfca_access_score"),
+          displayScore(d, "calibrated_score_life_circle")
+        ],
+        itemStyle: {
+          color: d.district === selectedDistrict
+            ? selectedColor
+            : displayScoreColor(displayScore(d, "calibrated_score_life_circle"))
+        }
       }))
     }]
   }), [scatter, selectedDistrict]);
@@ -523,8 +554,8 @@ const ChartsPanel = memo(function ChartsPanel({
     };
     const nodes = scatter.map((d, i) => ({
       name: d.district,
-      symbolSize: 14 + (d.calibrated_score_life_circle + 0.3) * 28,
-      itemStyle: { color: scoreColor(d.calibrated_score_life_circle) },
+      symbolSize: 12 + Math.max(0, displayScore(d, "calibrated_score_life_circle") - 3) * 3,
+      itemStyle: { color: displayScoreColor(displayScore(d, "calibrated_score_life_circle")) },
       category: 0
     }));
     const edges: Array<{ source: string; target: string; value: number }> = [];
@@ -655,8 +686,16 @@ const ChartsPanel = memo(function ChartsPanel({
           type: "scatter",
           data: sorted.map((d) => ({
             name: d.district,
-            value: [d.nearest_traffic_distance, d.avg_price, d.calibrated_score_life_circle],
-            itemStyle: { color: d.district === selectedDistrict ? selectedColor : scoreColor(d.calibrated_score_life_circle) }
+            value: [
+              d.nearest_traffic_distance,
+              d.avg_price,
+              displayScore(d, "calibrated_score_life_circle")
+            ],
+            itemStyle: {
+              color: d.district === selectedDistrict
+                ? selectedColor
+                : displayScoreColor(displayScore(d, "calibrated_score_life_circle"))
+            }
           })),
           symbolSize: 12
         },
@@ -760,15 +799,15 @@ const ChartsPanel = memo(function ChartsPanel({
       { key: "life_circle_score" as const, label: "生活圈" },
       { key: "e2sfca_access_score" as const, label: "供需可达" }
     ];
-    const selectedValues = fields.map((f) => Number(Number(selected[f.key]).toFixed(4)));
-    const cityValues = fields.map((f) => Number(Number(city[f.key]).toFixed(4)));
+    const selectedValues = fields.map((f) => Number(displayScore(selected, f.key).toFixed(1)));
+    const cityValues = fields.map((f) => Number(displayScore(city, f.key).toFixed(1)));
     return {
       color: [palette.primary, palette.accent],
       tooltip: { trigger: "item" },
       legend: { bottom: 0, data: [selected.district, "全市均值"], textStyle: axisText },
       radar: {
         radius: "62%", center: ["50%", "44%"],
-        indicator: fields.map((f) => ({ name: f.label, max: 1 })),
+        indicator: fields.map((f) => ({ name: f.label, max: 10 })),
         axisName: { color: "#6f5a4c", fontSize: 11 },
         splitLine: { lineStyle: { color: "#ead8c2" } },
         splitArea: { areaStyle: { color: ["rgba(255,248,235,0.65)", "rgba(236,248,240,0.45)"] } }
@@ -802,8 +841,12 @@ const ChartsPanel = memo(function ChartsPanel({
         symbolSize: (value: number[]) => Math.max(8, Math.min(28, Math.sqrt(value[0]) / 4)),
         data: valid.map((d) => ({
           name: d.district,
-          value: [d.house_count, d.sample_reliability_score, d.calibrated_score_life_circle],
-          itemStyle: { color: d.district === selectedDistrict ? selectedColor : scoreColor(d.calibrated_score_life_circle) }
+          value: [d.house_count, d.sample_reliability_score, displayScore(d, "calibrated_score_life_circle")],
+          itemStyle: {
+            color: d.district === selectedDistrict
+              ? selectedColor
+              : displayScoreColor(displayScore(d, "calibrated_score_life_circle"))
+          }
         }))
       }]
     };
@@ -826,7 +869,10 @@ const ChartsPanel = memo(function ChartsPanel({
       },
       scoreRanking: {
         unit: "校准+生活圈评分",
-        top: scoreRanking.slice(0, 10).map((d) => ({ district: d.district, value: Number(d.calibrated_score_life_circle.toFixed(3)) })),
+        top: scoreRanking.slice(0, 10).map((d) => ({
+          district: d.district,
+          value: Number(displayScore(d, "calibrated_score_life_circle").toFixed(1))
+        })),
         selected: metricSnapshot(selected), city_average: metricSnapshot(cityMetric)
       },
       quadrant: {
@@ -834,7 +880,9 @@ const ChartsPanel = memo(function ChartsPanel({
         city_average: { avg_price: Math.round(cityMetric.avg_price), business_activity: Number(cityMetric.business_activity.toFixed(1)) },
         points: scatter.map((d) => ({
           district: d.district, avg_price: Math.round(d.avg_price),
-          business_activity: Number(d.business_activity.toFixed(1)), poi_total: d.poi_total, life_circle_score: Number(d.life_circle_score.toFixed(3))
+          business_activity: Number(d.business_activity.toFixed(1)),
+          poi_total: d.poi_total,
+          life_circle_score: Number(displayScore(d, "life_circle_score").toFixed(1))
         }))
       },
       districtClustering: {
@@ -842,11 +890,11 @@ const ChartsPanel = memo(function ChartsPanel({
         features: ["负担力", "服务强度", "区域活力", "供需可达", "生活圈", "房价"],
         points: scatter.map((d) => ({
           district: d.district,
-          affordability_score: Number(d.affordability_score.toFixed(3)),
-          service_score: Number(d.service_score.toFixed(3)),
-          vitality_score: Number(d.vitality_score.toFixed(3)),
-          e2sfca_access_score: Number(d.e2sfca_access_score.toFixed(3)),
-          life_circle_score: Number(d.life_circle_score.toFixed(3)),
+          affordability_score: Number(displayScore(d, "affordability_score").toFixed(1)),
+          service_score: Number(displayScore(d, "service_score").toFixed(1)),
+          vitality_score: Number(displayScore(d, "vitality_score").toFixed(1)),
+          e2sfca_access_score: Number(displayScore(d, "e2sfca_access_score").toFixed(1)),
+          life_circle_score: Number(displayScore(d, "life_circle_score").toFixed(1)),
           avg_price: Math.round(d.avg_price)
         }))
       },
@@ -859,7 +907,7 @@ const ChartsPanel = memo(function ChartsPanel({
           district: d.district, shopping_count: d.shopping_count,
           traffic_count: d.traffic_count, healthcare_count: d.healthcare_count,
           recreation_count: d.recreation_count, company_count: d.company_count,
-          score: Number(d.calibrated_score_life_circle.toFixed(3))
+          score: Number(displayScore(d, "calibrated_score_life_circle").toFixed(1))
         }))
       },
       poiStack: {
@@ -878,15 +926,15 @@ const ChartsPanel = memo(function ChartsPanel({
           "5min": Number(d.life_circle_5min_coverage.toFixed(2)),
           "10min": Number(d.life_circle_10min_coverage.toFixed(2)),
           "15min": Number(d.life_circle_15min_coverage.toFixed(2)),
-          score: Number(d.calibrated_score_life_circle.toFixed(3))
+          score: Number(displayScore(d, "calibrated_score_life_circle").toFixed(1))
         }))
       },
       accessValue: {
         selected: metricSnapshot(selected), city_average: metricSnapshot(cityMetric),
         points: scatter.map((d) => ({
           district: d.district, avg_price: Math.round(d.avg_price),
-          e2sfca_access_score: Number(d.e2sfca_access_score.toFixed(3)),
-          calibrated_score_life_circle: Number(d.calibrated_score_life_circle.toFixed(3))
+          e2sfca_access_score: Number(displayScore(d, "e2sfca_access_score").toFixed(1)),
+          calibrated_score_life_circle: Number(displayScore(d, "calibrated_score_life_circle").toFixed(1))
         }))
       },
       correlation: {
@@ -927,13 +975,13 @@ const ChartsPanel = memo(function ChartsPanel({
       scoreWaterfall: {
         selected: selected.district,
         components: {
-          affordability: Number(selected.affordability_score.toFixed(4)),
-          service: Number(selected.service_score.toFixed(4)),
-          vitality: Number(selected.vitality_score.toFixed(4)),
-          life_circle: Number(selected.life_circle_score.toFixed(4)),
-          e2sfca: Number(selected.e2sfca_access_score.toFixed(4)),
+          affordability: Number(displayScore(selected, "affordability_score").toFixed(1)),
+          service: Number(displayScore(selected, "service_score").toFixed(1)),
+          vitality: Number(displayScore(selected, "vitality_score").toFixed(1)),
+          life_circle: Number(displayScore(selected, "life_circle_score").toFixed(1)),
+          e2sfca: Number(displayScore(selected, "e2sfca_access_score").toFixed(1)),
           reliability: Number(selected.sample_reliability_score.toFixed(4)),
-          final: Number(selected.calibrated_score_life_circle.toFixed(4))
+          final: Number(displayScore(selected, "calibrated_score_life_circle").toFixed(1))
         }
       },
       scoreComponent: {
@@ -943,7 +991,7 @@ const ChartsPanel = memo(function ChartsPanel({
         points: scatter.map((d) => ({
           district: d.district, house_count: d.house_count,
           sample_reliability_score: Number(d.sample_reliability_score.toFixed(3)),
-          calibrated_score_life_circle: Number(d.calibrated_score_life_circle.toFixed(3))
+          calibrated_score_life_circle: Number(displayScore(d, "calibrated_score_life_circle").toFixed(1))
         }))
       }
     };
@@ -1114,8 +1162,12 @@ function ChartCard({ title, children, desc, chartId, insightData, scope,
 
 // ==================== Utility Functions ====================
 
+function chartMetricValue(item: DistrictMetric, key: keyof DistrictMetric) {
+  return displayScoreKeys.has(key) ? displayScore(item, key) : Number(item[key]);
+}
+
 function average(items: DistrictMetric[], key: keyof DistrictMetric) {
-  const values = items.map((item) => Number(item[key])).filter((value) => Number.isFinite(value));
+  const values = items.map((item) => chartMetricValue(item, key)).filter((value) => Number.isFinite(value));
   if (!values.length) return 0;
   return values.reduce((sum, value) => sum + value, 0) / values.length;
 }
@@ -1126,8 +1178,8 @@ function pearson(items: DistrictMetric[], xKey: MetricKey, yKey: MetricKey) {
   const yMean = average(items, yKey);
   let numerator = 0, xVariance = 0, yVariance = 0;
   items.forEach((item) => {
-    const x = Number(item[xKey]) - xMean;
-    const y = Number(item[yKey]) - yMean;
+    const x = chartMetricValue(item, xKey) - xMean;
+    const y = chartMetricValue(item, yKey) - yMean;
     numerator += x * y; xVariance += x * x; yVariance += y * y;
   });
   const denominator = Math.sqrt(xVariance * yVariance);
@@ -1136,7 +1188,7 @@ function pearson(items: DistrictMetric[], xKey: MetricKey, yKey: MetricKey) {
 
 function buildRanges(items: DistrictMetric[], keys: MetricKey[]) {
   return keys.reduce((ranges, key) => {
-    const values = items.map((item) => Number(item[key]));
+    const values = items.map((item) => chartMetricValue(item, key));
     ranges[key] = { min: Math.min(...values), max: Math.max(...values) };
     return ranges;
   }, {} as Record<MetricKey, { min: number; max: number }>);
@@ -1194,9 +1246,9 @@ function metricSnapshot(metric: DistrictMetric) {
     poi_total: Math.round(metric.poi_total), shopping_count: Math.round(metric.shopping_count),
     traffic_count: Math.round(metric.traffic_count), healthcare_count: Math.round(metric.healthcare_count),
     business_activity: Number(metric.business_activity.toFixed(2)),
-    e2sfca_access_score: Number(metric.e2sfca_access_score.toFixed(3)),
-    calibrated_score: Number(metric.calibrated_score.toFixed(3)),
-    calibrated_score_life_circle: Number(metric.calibrated_score_life_circle.toFixed(3))
+    e2sfca_access_score: Number(displayScore(metric, "e2sfca_access_score").toFixed(1)),
+    calibrated_score: Number(displayScore(metric, "calibrated_score").toFixed(1)),
+    calibrated_score_life_circle: Number(displayScore(metric, "calibrated_score_life_circle").toFixed(1))
   };
 }
 
@@ -1212,11 +1264,11 @@ function lifeCircleSnapshot(metric: DistrictMetric) {
 function scoreComponentSnapshot(metric: DistrictMetric) {
   return {
     district: metric.district,
-    affordability_score: Number(metric.affordability_score.toFixed(4)),
-    service_score: Number(metric.service_score.toFixed(4)),
-    vitality_score: Number(metric.vitality_score.toFixed(4)),
-    life_circle_score: Number(metric.life_circle_score.toFixed(4)),
-    e2sfca_access_score: Number(metric.e2sfca_access_score.toFixed(4))
+    affordability_score: Number(displayScore(metric, "affordability_score").toFixed(1)),
+    service_score: Number(displayScore(metric, "service_score").toFixed(1)),
+    vitality_score: Number(displayScore(metric, "vitality_score").toFixed(1)),
+    life_circle_score: Number(displayScore(metric, "life_circle_score").toFixed(1)),
+    e2sfca_access_score: Number(displayScore(metric, "e2sfca_access_score").toFixed(1))
   };
 }
 
@@ -1230,7 +1282,9 @@ function buildAverageMetric(items: DistrictMetric[]): DistrictMetric {
     shopping_count: average(items, "shopping_count"), traffic_count: average(items, "traffic_count"),
     healthcare_count: average(items, "healthcare_count"), business_activity: average(items, "business_activity"),
     activity_norm: base?.activity_norm ?? 0, price_norm: base?.price_norm ?? 0,
-    livability_score: average(items, "livability_score"), poi_diversity: average(items, "poi_diversity"),
+    livability_score: average(items, "livability_score"),
+    livability_score_display: average(items, "livability_score"),
+    poi_diversity: average(items, "poi_diversity"),
     shopping_per_house: average(items, "shopping_per_house"),
     traffic_per_house: average(items, "traffic_per_house"),
     healthcare_per_house: average(items, "healthcare_per_house"),
@@ -1238,40 +1292,49 @@ function buildAverageMetric(items: DistrictMetric[]): DistrictMetric {
     company_per_house: average(items, "company_per_house"),
     cost_pressure: average(items, "cost_pressure"),
     affordability_score: average(items, "affordability_score"),
-    service_score: average(items, "service_score"), vitality_score: average(items, "vitality_score"),
+    affordability_score_display: average(items, "affordability_score"),
+    service_score: average(items, "service_score"),
+    service_score_display: average(items, "service_score"),
+    vitality_score: average(items, "vitality_score"),
+    vitality_score_display: average(items, "vitality_score"),
     livability_score_v2: average(items, "livability_score_v2"),
+    livability_score_v2_display: average(items, "livability_score_v2"),
     shopping_access: average(items, "shopping_access"), traffic_access: average(items, "traffic_access"),
     healthcare_access: average(items, "healthcare_access"), recreation_access: average(items, "recreation_access"),
     company_access: average(items, "company_access"),
     nearest_traffic_distance: average(items, "nearest_traffic_distance"),
     nearest_healthcare_distance: average(items, "nearest_healthcare_distance"),
-    access_score: average(items, "access_score"), value_score: average(items, "value_score"),
+    access_score: average(items, "access_score"),
+    access_score_display: average(items, "access_score"),
+    value_score: average(items, "value_score"),
+    value_score_display: average(items, "value_score"),
     shopping_e2sfca_access: average(items, "shopping_e2sfca_access"),
     traffic_e2sfca_access: average(items, "traffic_e2sfca_access"),
     healthcare_e2sfca_access: average(items, "healthcare_e2sfca_access"),
     recreation_e2sfca_access: average(items, "recreation_e2sfca_access"),
     company_e2sfca_access: average(items, "company_e2sfca_access"),
     e2sfca_access_score: average(items, "e2sfca_access_score"),
+    e2sfca_access_score_display: average(items, "e2sfca_access_score"),
     e2sfca_value_score: average(items, "e2sfca_value_score"),
+    e2sfca_value_score_display: average(items, "e2sfca_value_score"),
     sample_reliability_score: average(items, "sample_reliability_score"),
     calibrated_score: average(items, "calibrated_score"),
+    calibrated_score_display: average(items, "calibrated_score"),
     life_circle_5min_score: average(items, "life_circle_5min_score"),
+    life_circle_5min_score_display: average(items, "life_circle_5min_score"),
     life_circle_10min_score: average(items, "life_circle_10min_score"),
+    life_circle_10min_score_display: average(items, "life_circle_10min_score"),
     life_circle_15min_score: average(items, "life_circle_15min_score"),
+    life_circle_15min_score_display: average(items, "life_circle_15min_score"),
     life_circle_score: average(items, "life_circle_score"),
+    life_circle_score_display: average(items, "life_circle_score"),
     life_circle_5min_coverage: average(items, "life_circle_5min_coverage"),
     life_circle_10min_coverage: average(items, "life_circle_10min_coverage"),
     life_circle_15min_coverage: average(items, "life_circle_15min_coverage"),
     calibrated_score_life_circle: average(items, "calibrated_score_life_circle"),
+    calibrated_score_life_circle_display: average(items, "calibrated_score_life_circle"),
     center_lng: null, center_lat: null
   };
-}
-
-function scoreColor(score: number) {
-  if (score >= 0.2) return "#16a3b8";
-  if (score >= 0) return "#31b78f";
-  if (score >= -0.2) return "#f59e0b";
-  return "#ef6f61";
 }
 
 function lifeCircleColor(score: number) {

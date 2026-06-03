@@ -175,6 +175,8 @@ def load_standard_house_rows(df: pd.DataFrame) -> pd.DataFrame:
             result[text_col] = default
     if "street" not in result.columns:
         result["street"] = None
+    if "community_name" not in result.columns:
+        result["community_name"] = None
     if "is_valid_for_algorithm" in df.columns:
         result = result[df["is_valid_for_algorithm"].fillna(False).astype(bool)].copy()
     result = result.dropna(subset=["house_id", "district", "price", "unit_price", "wgs84_lng", "wgs84_lat", "gcj02_lng", "gcj02_lat"])
