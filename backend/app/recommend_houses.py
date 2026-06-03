@@ -36,6 +36,9 @@ class HouseCandidate:
     access_score: float = 0.0
     e2sfca_score: float = 0.0
     calibrated_score: float = 0.0
+    layout_score: float = 0.5
+    comfort_score: float = 0.5
+    community_quality_score: float = 0.5
     rule_score: float = 0.0
     final_score: float = 0.0
     llm_score: float | None = None
@@ -61,6 +64,9 @@ class CommunityCandidate:
     access_score: float
     e2sfca_score: float
     calibrated_score: float
+    layout_score: float
+    comfort_score: float
+    community_quality_score: float
     rule_score: float
     final_score: float
     breakdown: dict[str, float] | None = None
@@ -154,6 +160,190 @@ def _build_commute_score(commute_minutes: float | None, max_commute_minutes: flo
     if commute_minutes <= max_commute_minutes:
         return _clamp(1 - commute_minutes / max_commute_minutes * 0.5)
     return _clamp(max(0.0, 1 - (commute_minutes / max_commute_minutes - 1)))
+
+
+def _binary_like(value: object) -> float | None:
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return 1.0 if value else 0.0
+    text = str(value).strip().lower()
+    if text in {"1", "true", "yes", "y", "on"}:
+        return 1.0
+    if text in {"0", "false", "no", "n", "off"}:
+        return 0.0
+    try:
+        return 1.0 if float(value) > 0 else 0.0
+    except (TypeError, ValueError):
+        return None
+
+
+def _build_layout_score(row: HouseListing, target_area: float) -> float:
+    area = _get_house_area(row)
+    room = _float_attr(row, "room_count", default=0.0)
+    hall = _float_attr(row, "hall_count", default=0.0)
+    toilet = _float_attr(row, "toilet_count", default=0.0)
+
+    if area is None:
+        area_score = 0.5
+    elif target_area <= 0:
+        area_score = 0.5
+    else:
+        area_ratio = abs(area - target_area) / max(target_area, 1.0)
+        area_score = _clamp(1.0 - area_ratio)
+
+    room_score = _clamp(room / 4.0) if room > 0 else 0.2
+    hall_score = 1.0 if hall >= 1 else 0.4
+    toilet_score = _clamp(toilet / 2.0) if toilet > 0 else 0.3
+    return _clamp(0.45 * area_score + 0.30 * room_score + 0.15 * hall_score + 0.10 * toilet_score)
+
+
+def _build_comfort_score(row: HouseListing) -> float:
+    ns_flag = _binary_like(getattr(row, "faces_north_south", None))
+    elevator_flag = _binary_like(getattr(row, "has_elevator_text_flag", None))
+    south_flag = _binary_like(getattr(row, "faces_south", None))
+
+    renovation_text = str(getattr(row, "renovation", "") or "").lower()
+    if any(k in renovation_text for k in ("精装", "豪装", "modern", "new", "精装修")):
+        renovation_score = 1.0
+    elif any(k in renovation_text for k in ("简装", "普通", "毛坯", "old")):
+        renovation_score = 0.45
+    else:
+        renovation_score = 0.6
+
+    year_built = _float_attr(row, "year_built", default=0.0)
+    if year_built >= 2018:
+        year_score = 1.0
+    elif year_built >= 2010:
+        year_score = 0.82
+    elif year_built >= 2000:
+        year_score = 0.64
+    elif year_built > 0:
+        year_score = 0.45
+    else:
+        year_score = 0.55
+
+    orient_score = 0.5
+    if ns_flag is not None:
+        orient_score = 0.75 if ns_flag > 0 else 0.45
+    elif south_flag is not None:
+        orient_score = 0.68 if south_flag > 0 else 0.5
+
+    elevator_score = 0.6 if elevator_flag is None else (1.0 if elevator_flag > 0 else 0.35)
+    return _clamp(0.30 * orient_score + 0.25 * elevator_score + 0.25 * renovation_score + 0.20 * year_score)
+
+
+def _build_community_quality_score(row: HouseListing) -> float:
+    greening = _float_attr(row, "greening_rate", default=-1.0)
+    fee = _float_attr(row, "property_fee", default=-1.0)
+    households = _float_attr(row, "community_households", default=-1.0)
+
+    if greening < 0:
+        green_score = 0.55
+    elif greening <= 1.0:
+        green_score = _clamp(greening)
+    else:
+        green_score = _clamp(greening / 100.0)
+
+    if fee < 0:
+        fee_score = 0.55
+    elif fee <= 1.2:
+        fee_score = 0.42
+    elif fee <= 2.0:
+        fee_score = 0.62
+    elif fee <= 4.0:
+        fee_score = 0.85
+    elif fee <= 7.0:
+        fee_score = 0.72
+    else:
+        fee_score = 0.52
+
+    if households < 0:
+        household_score = 0.55
+    elif households < 80:
+        household_score = 0.46
+    elif households <= 1200:
+        household_score = 0.9
+    elif households <= 2200:
+        household_score = 0.7
+    else:
+        household_score = 0.5
+
+    return _clamp(0.40 * green_score + 0.30 * fee_score + 0.30 * household_score)
+
+
+def _safe_int(value: object, default: int = 0) -> int:
+    try:
+        if value is None:
+            return default
+        return int(float(value))
+    except (TypeError, ValueError):
+        return default
+
+
+def _safe_float(value: object, default: float | None = None) -> float | None:
+    try:
+        if value is None:
+            return default
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _format_layout_tag(row: HouseListing) -> str | None:
+    room = _safe_int(getattr(row, "room_count", None), 0)
+    hall = _safe_int(getattr(row, "hall_count", None), 0)
+    if room <= 0:
+        return None
+    hall = max(hall, 0)
+    return f"{room}室{hall}厅"
+
+
+def _orientation_tag(row: HouseListing) -> str | None:
+    ns = _safe_int(getattr(row, "faces_north_south", None), 0)
+    south = _safe_int(getattr(row, "faces_south", None), 0)
+    if ns > 0:
+        return "南北通透"
+    if south > 0:
+        return "朝南"
+    return None
+
+
+def _renovation_tag(row: HouseListing) -> str | None:
+    text = str(getattr(row, "renovation", "") or "").strip()
+    return text or None
+
+
+def _build_house_tags(row: HouseListing) -> list[str]:
+    tags: list[str] = []
+    layout = _format_layout_tag(row)
+    if layout:
+        tags.append(layout)
+    orient = _orientation_tag(row)
+    if orient:
+        tags.append(orient)
+    if _safe_int(getattr(row, "near_subway_text_flag", None), 0) > 0:
+        tags.append("近地铁")
+    if _safe_int(getattr(row, "has_elevator_text_flag", None), 0) > 0:
+        tags.append("有电梯")
+    renovation = _renovation_tag(row)
+    if renovation:
+        tags.append(renovation)
+    return tags
+
+
+def _house_explain_features(row: HouseListing) -> dict[str, object]:
+    return {
+        "layout": _format_layout_tag(row),
+        "area_sqm": round(float(_get_house_area(row)), 2) if _get_house_area(row) is not None else None,
+        "orientation": _orientation_tag(row),
+        "has_elevator": bool(_safe_int(getattr(row, "has_elevator_text_flag", None), 0) > 0),
+        "near_subway": bool(_safe_int(getattr(row, "near_subway_text_flag", None), 0) > 0),
+        "renovation": _renovation_tag(row),
+        "year_built": _safe_int(getattr(row, "year_built", None), 0) or None,
+        "property_fee": _safe_float(getattr(row, "property_fee", None), None),
+        "greening_rate": _safe_float(getattr(row, "greening_rate", None), None),
+    }
 
 
 def _weight_inputs(payload: HouseRecommendRequest) -> tuple[float, float]:
@@ -251,13 +441,16 @@ def _compute_house_score(item: HouseCandidate, version: str) -> tuple[float, dic
         return score, breakdown
 
     score = _clamp(
-        0.30 * item.budget_score
-        + 0.23 * item.commute_score
-        + 0.12 * item.poi_score
-        + 0.12 * item.poi_subtype_score
-        + 0.10 * item.access_score
-        + 0.07 * item.e2sfca_score
-        + 0.06 * item.calibrated_score
+        0.24 * item.budget_score
+        + 0.20 * item.commute_score
+        + 0.10 * item.poi_score
+        + 0.10 * item.poi_subtype_score
+        + 0.08 * item.access_score
+        + 0.05 * item.e2sfca_score
+        + 0.05 * item.calibrated_score
+        + 0.08 * item.layout_score
+        + 0.06 * item.comfort_score
+        + 0.04 * item.community_quality_score
     )
     breakdown = {
         "budget": round(item.budget_score, 4),
@@ -267,6 +460,9 @@ def _compute_house_score(item: HouseCandidate, version: str) -> tuple[float, dic
         "access": round(item.access_score, 4),
         "e2sfca": round(item.e2sfca_score, 4),
         "calibrated": round(item.calibrated_score, 4),
+        "layout_match": round(item.layout_score, 4),
+        "living_comfort": round(item.comfort_score, 4),
+        "community_quality": round(item.community_quality_score, 4),
     }
     return score, breakdown
 
@@ -301,13 +497,16 @@ def _compute_community_score(item: CommunityCandidate, version: str) -> tuple[fl
         return score, breakdown
 
     score = _clamp(
-        0.31 * item.budget_match_score
-        + 0.22 * item.traffic_score
-        + 0.12 * item.poi_score
-        + 0.12 * item.poi_subtype_score
-        + 0.10 * item.access_score
-        + 0.07 * item.e2sfca_score
-        + 0.06 * item.calibrated_score
+        0.26 * item.budget_match_score
+        + 0.19 * item.traffic_score
+        + 0.10 * item.poi_score
+        + 0.10 * item.poi_subtype_score
+        + 0.08 * item.access_score
+        + 0.05 * item.e2sfca_score
+        + 0.04 * item.calibrated_score
+        + 0.09 * item.layout_score
+        + 0.06 * item.comfort_score
+        + 0.03 * item.community_quality_score
     )
     breakdown = {
         "budget": round(item.budget_match_score, 4),
@@ -317,6 +516,9 @@ def _compute_community_score(item: CommunityCandidate, version: str) -> tuple[fl
         "access": round(item.access_score, 4),
         "e2sfca": round(item.e2sfca_score, 4),
         "calibrated": round(item.calibrated_score, 4),
+        "layout_match": round(item.layout_score, 4),
+        "living_comfort": round(item.comfort_score, 4),
+        "community_quality": round(item.community_quality_score, 4),
     }
     return score, breakdown
 
@@ -341,6 +543,10 @@ def _build_house_llm_rows(candidates: list[HouseCandidate], max_items: int) -> l
                 "access_score": round(item.access_score, 4),
                 "e2sfca_score": round(item.e2sfca_score, 4),
                 "calibrated_score": round(item.calibrated_score, 4),
+                "layout_score": round(item.layout_score, 4),
+                "comfort_score": round(item.comfort_score, 4),
+                "community_quality_score": round(item.community_quality_score, 4),
+                "house_features": _house_explain_features(item.model),
                 "rule_score": round(item.rule_score, 4),
             }
         )
@@ -348,6 +554,7 @@ def _build_house_llm_rows(candidates: list[HouseCandidate], max_items: int) -> l
 
 
 def _apply_house_llm_rerank(payload: HouseRecommendRequest, affordable_unit_price: float, candidates: list[HouseCandidate]) -> dict[str, int | str | bool]:
+    pre_top_ids = [str(item.model.house_id or item.model.id) for item in sorted(candidates, key=lambda x: x.rule_score, reverse=True)[:5]]
     rows = _build_house_llm_rows(candidates, payload.max_route_calls)
     result = rerank_house_candidates(
         work_address=payload.work_address,
@@ -374,12 +581,15 @@ def _apply_house_llm_rerank(payload: HouseRecommendRequest, affordable_unit_pric
     for item in candidates:
         if item.final_score <= 0:
             item.final_score = item.rule_score
+    post_top_ids = [str(item.model.house_id or item.model.id) for item in sorted(candidates, key=lambda x: x.final_score, reverse=True)[:5]]
+    topk_change_count = len(set(pre_top_ids) ^ set(post_top_ids))
     return {
         "house_rerank_applied": result.applied,
         "house_rerank_latency_ms": result.latency_ms,
         "house_rerank_candidates": len(rows),
         "house_rerank_success_count": hits,
         "house_rerank_error": result.error or "",
+        "house_rerank_top5_change_count": topk_change_count,
     }
 
 
@@ -403,6 +613,9 @@ def _build_community_llm_rows(communities: list[CommunityCandidate], max_items: 
                 "access_score": round(item.access_score, 4),
                 "e2sfca_score": round(item.e2sfca_score, 4),
                 "calibrated_score": round(item.calibrated_score, 4),
+                "layout_score": round(item.layout_score, 4),
+                "comfort_score": round(item.comfort_score, 4),
+                "community_quality_score": round(item.community_quality_score, 4),
                 "rule_score": round(item.rule_score, 4),
             }
         )
@@ -512,6 +725,9 @@ def recommend_houses(payload: HouseRecommendRequest, db: Session) -> HouseRecomm
         item.access_score = access_map.get(district, 0.5)
         item.e2sfca_score = e2sfca_map.get(district, 0.5)
         item.calibrated_score = street_calibrated_map.get(street_key, calibrated_map.get(district, 0.5))
+        item.layout_score = _build_layout_score(item.model, payload.target_area)
+        item.comfort_score = _build_comfort_score(item.model)
+        item.community_quality_score = _build_community_quality_score(item.model)
         item.rule_score = _compute_house_pre_score(item, version)
         item.final_score = item.rule_score
 
@@ -603,6 +819,9 @@ def recommend_houses(payload: HouseRecommendRequest, db: Session) -> HouseRecomm
             access_score=mean(i.access_score for i in items),
             e2sfca_score=mean(i.e2sfca_score for i in items),
             calibrated_score=mean(i.calibrated_score for i in items),
+            layout_score=mean(i.layout_score for i in items),
+            comfort_score=mean(i.comfort_score for i in items),
+            community_quality_score=mean(i.community_quality_score for i in items),
             rule_score=0.0,
             final_score=0.0,
         )
@@ -618,6 +837,10 @@ def recommend_houses(payload: HouseRecommendRequest, db: Session) -> HouseRecomm
 
     community_rows: list[CommunityRecommendation] = []
     for item in top_communities:
+        fallback_reason = (
+            f"户型匹配{item.layout_score:.2f}、居住舒适{item.comfort_score:.2f}、社区质量{item.community_quality_score:.2f}；"
+            f"均价约{int(round(item.avg_unit_price))}，综合平衡预算与通勤。"
+        )
         community_rows.append(
             CommunityRecommendation(
                 district=item.district,
@@ -635,7 +858,7 @@ def recommend_houses(payload: HouseRecommendRequest, db: Session) -> HouseRecomm
                 traffic_score=round(item.traffic_score, 4),
                 budget_match_score=round(item.budget_match_score, 4),
                 score_breakdown=item.breakdown,
-                reason=item.llm_reason or f"Average unit price {int(round(item.avg_unit_price))}, balanced by budget/commute.",
+                reason=item.llm_reason or fallback_reason,
                 risks=[
                     "Community grouping is inferred from current street-level data.",
                     "Please verify listings before decision.",
@@ -644,6 +867,7 @@ def recommend_houses(payload: HouseRecommendRequest, db: Session) -> HouseRecomm
         )
 
     house_ids_by_community: dict[str, list[str]] = {item.community_id: [] for item in top_communities}
+    house_tags_by_community: dict[str, dict[str, list[str]]] = {item.community_id: {} for item in top_communities}
     for item in sorted(candidates, key=lambda x: x.final_score, reverse=True):
         community_id = f"{item.district}|{item.sub_district}|{item.community_name}"
         if community_id not in allowed_communities:
@@ -651,9 +875,32 @@ def recommend_houses(payload: HouseRecommendRequest, db: Session) -> HouseRecomm
         existing_count = len(house_ids_by_community.get(community_id, []))
         if existing_count >= payload.top_houses_per_community:
             continue
-        house_ids_by_community[community_id].append(str(item.model.house_id or item.model.id))
+        hid = str(item.model.house_id or item.model.id)
+        house_ids_by_community[community_id].append(hid)
+        house_tags_by_community[community_id][hid] = _build_house_tags(item.model)
 
     community_house_ids = {item.community_id: house_ids_by_community.get(item.community_id, []) for item in top_communities}
+    community_house_tags = {item.community_id: house_tags_by_community.get(item.community_id, {}) for item in top_communities}
+
+    returned_items: list[HouseCandidate] = []
+    selected_pairs = {(cid, hid) for cid, ids in house_ids_by_community.items() for hid in ids}
+    for item in candidates:
+        cid = f"{item.district}|{item.sub_district}|{item.community_name}"
+        hid = str(item.model.house_id or item.model.id)
+        if (cid, hid) in selected_pairs:
+            returned_items.append(item)
+
+    returned_count = len(returned_items)
+    elevator_hits = sum(1 for i in returned_items if _safe_int(getattr(i.model, "has_elevator_text_flag", None), 0) > 0)
+    subway_hits = sum(1 for i in returned_items if _safe_int(getattr(i.model, "near_subway_text_flag", None), 0) > 0)
+    elevator_hit_rate = elevator_hits / returned_count if returned_count else 0.0
+    subway_hit_rate = subway_hits / returned_count if returned_count else 0.0
+    preference_consistency = _clamp(
+        0.35 * (mean(i.budget_score for i in returned_items) if returned_items else 0.0)
+        + 0.30 * (mean(i.commute_score for i in returned_items) if returned_items else 0.0)
+        + 0.20 * (mean(i.poi_subtype_score for i in returned_items) if returned_items else 0.0)
+        + 0.15 * (mean(i.layout_score for i in returned_items) if returned_items else 0.0)
+    )
 
     summary: dict[str, float | int | str | bool | None] = {
         "feature_version_used": version,
@@ -669,6 +916,10 @@ def recommend_houses(payload: HouseRecommendRequest, db: Session) -> HouseRecomm
         "house_rerank_success_count": house_rerank_diag["house_rerank_success_count"],
         "house_rerank_latency_ms": house_rerank_diag["house_rerank_latency_ms"],
         "house_rerank_error": house_rerank_diag["house_rerank_error"],
+        "house_rerank_top5_change_count": int(house_rerank_diag.get("house_rerank_top5_change_count", 0)),
+        "constraint_hit_rate_elevator": round(elevator_hit_rate, 4),
+        "constraint_hit_rate_near_subway": round(subway_hit_rate, 4),
+        "preference_consistency_score": round(preference_consistency, 4),
         "community_rerank_applied": community_rerank_diag["community_rerank_applied"],
         "community_rerank_candidates": community_rerank_diag["community_rerank_candidates"],
         "community_rerank_success_count": community_rerank_diag["community_rerank_success_count"],
@@ -692,7 +943,18 @@ def recommend_houses(payload: HouseRecommendRequest, db: Session) -> HouseRecomm
         work_location=work_location_str,
         streets=top_streets,
         communities=[
-            community.model_copy(update={"house_ids": community_house_ids.get(f"{community.district}|{community.sub_district}|{community.community_name}", [])})
+            community.model_copy(
+                update={
+                    "house_ids": community_house_ids.get(
+                        f"{community.district}|{community.sub_district}|{community.community_name}",
+                        [],
+                    ),
+                    "house_feature_tags": community_house_tags.get(
+                        f"{community.district}|{community.sub_district}|{community.community_name}",
+                        {},
+                    ),
+                }
+            )
             for community in community_rows
         ],
         summary=summary,

@@ -53,6 +53,7 @@ class CommunityRecommendation(BaseModel):
     avg_total_price: float
     house_count: int
     house_ids: list[str] = Field(default_factory=list)
+    house_feature_tags: dict[str, list[str]] = Field(default_factory=dict)
     poi_score: float
     traffic_score: float
     budget_match_score: float

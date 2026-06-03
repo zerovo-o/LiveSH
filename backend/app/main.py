@@ -9,8 +9,7 @@ from .ai_advice import generate_ai_advice
 from .amap import fetch_local_shanghai_street_boundaries, fetch_shanghai_district_boundaries
 from .chart_insight import generate_chart_insight
 from .database import Base, engine, get_db
-from .house_recommend_schemas import HouseRecommendRequest, HouseRecommendResponse
-from .models import DistrictMetric, HouseListing, PoiCategoryMetric, StreetMetric
+from .models import DistrictMetric, HouseListing, PoiCategoryMetric, PoiPoint, StreetMetric
 from .recommend_houses import recommend_houses
 from .route_life_circle import load_yangpu_route_metrics
 from .schemas import (
@@ -177,6 +176,33 @@ def chart_insight(payload: ChartInsightRequest):
 @app.post("/api/agent/recommend-houses", response_model=HouseRecommendResponse)
 def agent_recommend_houses(payload: HouseRecommendRequest, db: Session = Depends(get_db)):
     return recommend_houses(payload, db)
+
+
+@app.get("/api/pois/heatmap")
+def pois_heatmap(category: str = "all", db: Session = Depends(get_db)):
+    statement = select(PoiPoint.gcj02_lng, PoiPoint.gcj02_lat, PoiPoint.category, PoiPoint.supply_weight)
+    if category != "all":
+        statement = statement.where(PoiPoint.category == category)
+    rows = db.execute(statement).all()
+    return {
+        "points": [
+            {"lng": row[0], "lat": row[1], "category": row[2], "weight": row[3] or 1.0}
+            for row in rows
+        ]
+    }
+
+
+@app.get("/api/houses/heatmap")
+def houses_heatmap(db: Session = Depends(get_db)):
+    rows = db.execute(
+        select(HouseListing.gcj02_lng, HouseListing.gcj02_lat, HouseListing.unit_price)
+    ).all()
+    return {
+        "points": [
+            {"lng": row[0], "lat": row[1], "unit_price": row[2]}
+            for row in rows
+        ]
+    }
 
 
 def main() -> None:

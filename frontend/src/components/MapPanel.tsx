@@ -18,6 +18,7 @@ type MapPanelProps = {
 };
 
 type MapMode = "calibrated" | "lifeCircle" | "e2sfca" | "robust" | "access" | "value" | "price" | "poi" | "activity";
+type HeatmapMode = "off" | "poi" | "shopping" | "traffic" | "healthcare" | "price";
 type DistrictBoundary = {
   name: string;
   adcode?: string;
@@ -132,6 +133,40 @@ const mapModes: Record<
 
 const visibleMapModes: MapMode[] = ["calibrated", "lifeCircle", "price", "poi", "activity"];
 
+const heatmapModes: { mode: HeatmapMode; label: string; endpoint: string; gradient: Record<number, string> }[] = [
+  { mode: "off", label: "关闭热力", endpoint: "", gradient: {} },
+  {
+    mode: "poi",
+    label: "POI总密度",
+    endpoint: "/api/pois/heatmap",
+    gradient: { 0.1: "#1a9641", 0.3: "#a6d96a", 0.5: "#ffffbf", 0.7: "#fdae61", 0.9: "#d7191c" }
+  },
+  {
+    mode: "shopping",
+    label: "购物密度",
+    endpoint: "/api/pois/heatmap?category=%E8%B4%AD%E7%89%A9",
+    gradient: { 0.1: "#0571b0", 0.3: "#92c5de", 0.5: "#f7f7f7", 0.7: "#f4a582", 0.9: "#ca0020" }
+  },
+  {
+    mode: "traffic",
+    label: "交通密度",
+    endpoint: "/api/pois/heatmap?category=%E4%BA%A4%E9%80%9A",
+    gradient: { 0.1: "#313695", 0.3: "#74add1", 0.5: "#e0f3f8", 0.7: "#fdae61", 0.9: "#d73027" }
+  },
+  {
+    mode: "healthcare",
+    label: "医疗密度",
+    endpoint: "/api/pois/heatmap?category=%E5%8C%BB%E7%96%97",
+    gradient: { 0.1: "#762a83", 0.3: "#af8dc3", 0.5: "#e7d4e8", 0.7: "#d9f0d3", 0.9: "#1b7837" }
+  },
+  {
+    mode: "price",
+    label: "房价热度",
+    endpoint: "/api/houses/heatmap",
+    gradient: { 0.1: "#2b83ba", 0.3: "#abdda4", 0.5: "#ffffbf", 0.7: "#fdae61", 0.9: "#d7191c" }
+  }
+];
+
 function hexToRgb(hex: string) {
   const normalized = hex.replace("#", "");
   return {
@@ -155,6 +190,24 @@ function streetKey(district: string, street: string) {
   return `${normalizeDistrictName(district)}::${street}`;
 }
 
+function renderHeatmapLayer(map: any, data: Array<{lng: number; lat: number; count: number}>, gradient: Record<number, string>) {
+  const AMap = window.AMap;
+  if (!AMap || !data.length) return null;
+  // Downsample to ~25K points for performance
+  const sampled = data.length > 25000 ? data.filter(() => Math.random() < 25000 / data.length) : data.slice();
+  const maxVal = Math.max(...sampled.map((d) => d.count).filter((v) => Number.isFinite(v)), 1);
+  const layer = new AMap.HeatMap(map, {
+    radius: 50,
+    opacity: [0, 0.8],
+    gradient,
+    zooms: [8, 18],
+    visible: true,
+    "3d": { heightScale: 0.6, gridSize: 8 }
+  });
+  layer.setDataSet({ data: sampled, max: maxVal });
+  return layer;
+}
+
 function loadAmap() {
   if (window.AMap) return Promise.resolve(window.AMap);
   const key = import.meta.env.VITE_AMAP_KEY as string | undefined;
@@ -164,7 +217,7 @@ function loadAmap() {
   }
   return new Promise<any>((resolve, reject) => {
     const script = document.createElement("script");
-    script.src = `https://webapi.amap.com/maps?v=2.0&key=${key ?? ""}&plugin=AMap.DistrictSearch`;
+    script.src = `https://webapi.amap.com/maps?v=2.0&key=${key ?? ""}&plugin=AMap.DistrictSearch,AMap.HeatMap`;
     script.async = true;
     script.onload = () => resolve(window.AMap);
     script.onerror = () => reject(new Error("AMap script failed"));
@@ -213,6 +266,9 @@ const MapPanel = memo(function MapPanel({ districts, selectedDistrict, recommend
   const [showStreetBoundaries, setShowStreetBoundaries] = useState(DEFAULT_SHOW_STREET_BOUNDARIES);
   const [districtBubbles, setDistrictBubbles] = useState<DistrictBubblePosition[]>([]);
   const [infoWindowOpen, setInfoWindowOpen] = useState(false);
+  const [heatmapMode, setHeatmapMode] = useState<HeatmapMode>("off");
+  const heatmapLayerRef = useRef<any>(null);
+  const heatmapDataCacheRef = useRef<Record<string, Array<{lng: number; lat: number; count: number}>>>({});
 
   const metricByName = useMemo(() => {
     const map = new Map<string, DistrictMetric>();
@@ -563,6 +619,12 @@ const MapPanel = memo(function MapPanel({ districts, selectedDistrict, recommend
         window.cancelAnimationFrame(bubbleFrameRef.current);
         bubbleFrameRef.current = null;
       }
+      if (heatmapLayerRef.current) {
+        if (typeof heatmapLayerRef.current.setMap === "function") {
+          heatmapLayerRef.current.setMap(null);
+        }
+        heatmapLayerRef.current = null;
+      }
     };
   }, [districts, metricByName, onSelectDistrict, recommendationNames, recommendations, scheduleDistrictBubbleUpdate, selectedDistrict]);
 
@@ -611,6 +673,45 @@ const MapPanel = memo(function MapPanel({ districts, selectedDistrict, recommend
     }
   }, [showStreetBoundaries]);
 
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !window.AMap) return;
+
+    // Properly remove existing heatmap layer
+    if (heatmapLayerRef.current) {
+      if (typeof heatmapLayerRef.current.setMap === "function") {
+        heatmapLayerRef.current.setMap(null);
+      } else if (typeof heatmapLayerRef.current.hide === "function") {
+        heatmapLayerRef.current.hide();
+      }
+      heatmapLayerRef.current = null;
+    }
+
+    if (heatmapMode === "off") return;
+
+    const hmConfig = heatmapModes.find((hm) => hm.mode === heatmapMode);
+    if (!hmConfig) return;
+
+    const cached = heatmapDataCacheRef.current[heatmapMode];
+    if (cached) {
+      heatmapLayerRef.current = renderHeatmapLayer(map, cached, hmConfig.gradient);
+      return;
+    }
+
+    fetch(hmConfig.endpoint)
+      .then((res) => res.json())
+      .then((data: { points?: Array<{ lng: number; lat: number; weight?: number; unit_price?: number }> }) => {
+        const points = (data.points ?? []).map((p) => ({
+          lng: p.lng,
+          lat: p.lat,
+          count: heatmapMode === "price" ? ((p.unit_price ?? 50000) / 10000) : (p.weight ?? 1) * 10
+        }));
+        heatmapDataCacheRef.current[heatmapMode] = points;
+        heatmapLayerRef.current = renderHeatmapLayer(map, points, hmConfig.gradient);
+      })
+      .catch(() => undefined);
+  }, [heatmapMode]);
+
   return (
     <section className="relative h-full overflow-hidden rounded-lg border border-slate-200 bg-white shadow-soft">
       <div className="absolute right-4 top-4 z-20 rounded-lg border border-[#ead8c2]/70 bg-white/80 px-3 py-3 text-sm shadow-soft backdrop-blur-md">
@@ -658,6 +759,25 @@ const MapPanel = memo(function MapPanel({ districts, selectedDistrict, recommend
           >
             {showStreetBoundaries ? "隐藏街道边界" : "显示街道边界"}
           </button>
+        </div>
+        <div className="mt-3 border-t border-[#ead8c2] pt-3">
+          <span className="mb-2 block text-xs font-semibold text-[#33251f]">热力图层</span>
+          <div className="flex flex-wrap gap-1.5">
+            {heatmapModes.map((hm) => (
+              <button
+                key={hm.mode}
+                type="button"
+                onClick={() => setHeatmapMode(hm.mode)}
+                className={`whitespace-nowrap rounded-full border px-2 py-1 text-[11px] font-medium transition ${
+                  heatmapMode === hm.mode
+                    ? "border-[#7cc4a4] bg-[#ecfdf3] text-[#176b50]"
+                    : "border-[#ead8c2] bg-white text-[#775f4d] hover:border-[#d4c0a8]"
+                }`}
+              >
+                {hm.label}
+              </button>
+            ))}
+          </div>
         </div>
       </div>
 
