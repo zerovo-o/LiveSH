@@ -9,6 +9,7 @@ from .ai_advice import generate_ai_advice
 from .amap import fetch_local_shanghai_street_boundaries, fetch_shanghai_district_boundaries
 from .chart_insight import generate_chart_insight
 from .database import Base, engine, get_db
+from .house_recommend_schemas import HouseRecommendRequest, HouseRecommendResponse
 from .models import DistrictMetric, HouseListing, PoiCategoryMetric, PoiPoint, StreetMetric
 from .recommend_houses import recommend_houses
 from .route_life_circle import load_yangpu_route_metrics
