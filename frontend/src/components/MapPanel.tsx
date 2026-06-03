@@ -17,7 +17,7 @@ type MapPanelProps = {
   onSelectDistrict: (district: string) => void;
 };
 
-type MapMode = "calibrated" | "lifeCircle" | "e2sfca" | "robust" | "access" | "value" | "price" | "poi" | "activity";
+type MapMode = "calibrated" | "lifeCircle" | "e2sfca" | "robust" | "access" | "value" | "price" | "poi";
 type DistrictBoundary = {
   name: string;
   adcode?: string;
@@ -119,18 +119,10 @@ const mapModes: Record<
     high: "#f97316",
     value: (item) => item.poi_total,
     format: (value) => `${Math.round(value / 1000)}k`
-  },
-  activity: {
-    label: "商圈活跃度",
-    unit: "",
-    low: "#fef3c7",
-    high: "#ef4444",
-    value: (item) => item.business_activity,
-    format: (value) => Math.round(value).toLocaleString("zh-CN")
   }
 };
 
-const visibleMapModes: MapMode[] = ["calibrated", "lifeCircle", "price", "poi", "activity"];
+const visibleMapModes: MapMode[] = ["calibrated", "lifeCircle", "price", "poi"];
 
 function hexToRgb(hex: string) {
   const normalized = hex.replace("#", "");
