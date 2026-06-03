@@ -104,7 +104,7 @@ function stripPlotOption(
           value: [selVal, 0], symbol: "roundRect", symbolSize: [3, 36],
           itemStyle: { color: rankColor(rank, total) },
           label: {
-            show: true, position: "top", distance: 14,
+            show: true, position: "bottom", distance: 8,
             formatter: `#${rank}`,
             color: rankColor(rank, total), fontSize: 12, fontWeight: "bold",
           },
