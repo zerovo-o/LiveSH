@@ -5,14 +5,16 @@ import { Loader2, Sparkles, X } from "lucide-react";
 import EChart from "./charts/EChart";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { displayScore, formatScore, scoreColor as displayScoreColor } from "../lib/utils";
+import StreetChartsPanel from "./StreetChartsPanel";
 import type { ChartInsight, DistrictMetric, PoiCategory } from "../types/metrics";
 
-type ModuleId = "market" | "poi" | "relation" | "model";
+type ModuleId = "market" | "poi" | "relation" | "street" | "model";
 
 const modules: { id: ModuleId; label: string }[] = [
   { id: "market", label: "市场画像" },
   { id: "poi", label: "设施与生活圈" },
   { id: "relation", label: "关系与网络" },
+  { id: "street", label: "街镇分析" },
   { id: "model", label: "评分模型" }
 ];
 
@@ -109,7 +111,7 @@ const radarFields: { key: MetricKey; label: string; inverse?: boolean }[] = [
 const selectedDependentChartIds = new Set([
   "priceTop10", "scoreRanking", "quadrant", "groupedPoi", "poiStack",
   "radar", "accessValue", "perHouse", "lifeCircleCompare",
-  "sampleReliability", "scoreComponent", "districtClustering", "districtSimilarity",
+  "scoreComponent", "districtClustering", "districtSimilarity",
   "supplyDemand", "commutePrice", "scoreWaterfall", "lifeCircleHeatmap"
 ]);
 
@@ -824,34 +826,6 @@ const ChartsPanel = memo(function ChartsPanel({
     };
   }, [scatter, selectedMetric]);
 
-  const sampleReliabilityOption = useMemo<EChartsOption>(() => {
-    const valid = scatter.filter((d) => d.house_count > 0);
-    return {
-      grid: { top: 24, left: 58, right: 22, bottom: 46 },
-      tooltip: {
-        formatter: (params: unknown) => {
-          const data = readPointTooltipData(params);
-          return `${data.name}<br/>样本量 ${Math.round(data.value[0])} 套<br/>可靠性 ${data.value[1].toFixed(3)}<br/>校准评分 ${data.value[2].toFixed(3)}`;
-        }
-      },
-      xAxis: { type: "value", name: "挂牌样本量 (套)", nameTextStyle: axisText, axisLabel: axisText },
-      yAxis: { type: "value", name: "样本可靠性评分", nameTextStyle: axisText, axisLabel: axisText, min: 0, max: 1 },
-      series: [{
-        type: "scatter",
-        symbolSize: (value: number[]) => Math.max(8, Math.min(28, Math.sqrt(value[0]) / 4)),
-        data: valid.map((d) => ({
-          name: d.district,
-          value: [d.house_count, d.sample_reliability_score, displayScore(d, "calibrated_score_life_circle")],
-          itemStyle: {
-            color: d.district === selectedDistrict
-              ? selectedColor
-              : displayScoreColor(displayScore(d, "calibrated_score_life_circle"))
-          }
-        }))
-      }]
-    };
-  }, [scatter, selectedDistrict]);
-
   // ==================== AI Insight Data ====================
   const chartInsightData = useMemo<Record<string, Record<string, unknown>>>(() => {
     const selected = selectedMetric ?? cityMetric;
@@ -987,13 +961,6 @@ const ChartsPanel = memo(function ChartsPanel({
       scoreComponent: {
         selected: scoreComponentSnapshot(selected), city_average: scoreComponentSnapshot(cityMetric)
       },
-      sampleReliability: {
-        points: scatter.map((d) => ({
-          district: d.district, house_count: d.house_count,
-          sample_reliability_score: Number(d.sample_reliability_score.toFixed(3)),
-          calibrated_score_life_circle: Number(displayScore(d, "calibrated_score_life_circle").toFixed(1))
-        }))
-      }
     };
   }, [cityMetric, poiCategories, priceTop10, scatter, scoreRanking, selectedMetric, shoppingTop5]);
 
@@ -1080,6 +1047,8 @@ const ChartsPanel = memo(function ChartsPanel({
             </div>
           ) : null}
 
+          {activeModule === "street" ? <StreetChartsPanel district={selectedDistrict} /> : null}
+
           {activeModule === "model" ? (
             <div className="grid grid-cols-1 gap-4">
               <ChartCard chartId="lifeCircleCompare" title="生活圈覆盖率对比" desc="5/10/15分钟生活圈覆盖率，对比选中区域与全市均值。" insightData={chartInsightData.lifeCircleCompare} insight={insights.lifeCircleCompare} loading={insightLoading.lifeCircleCompare} error={insightErrors.lifeCircleCompare} onInsight={loadChartInsight}>
@@ -1090,9 +1059,6 @@ const ChartsPanel = memo(function ChartsPanel({
               </ChartCard>
               <ChartCard chartId="scoreComponent" title="评分维度构成" desc="展示评分子维度构成，对比选中区域与全市均值。" insightData={chartInsightData.scoreComponent} insight={insights.scoreComponent} loading={insightLoading.scoreComponent} error={insightErrors.scoreComponent} onInsight={loadChartInsight}>
                 <EChart option={scoreComponentOption} className="h-[28rem] w-full" />
-              </ChartCard>
-              <ChartCard chartId="sampleReliability" title="样本量与评分可靠性" desc="挂牌样本量与可靠性评分的关系，气泡大小反映校准评分。" insightData={chartInsightData.sampleReliability} insight={insights.sampleReliability} loading={insightLoading.sampleReliability} error={insightErrors.sampleReliability} onInsight={loadChartInsight}>
-                <EChart option={sampleReliabilityOption} className="h-[28rem] w-full" onClick={handleChartClick} />
               </ChartCard>
             </div>
           ) : null}
