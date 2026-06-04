@@ -13,6 +13,7 @@ GeocodeLocation = tuple[float, float]
 CommuteMode = Literal["transit", "driving"]
 
 GEOCODE_URL = "https://restapi.amap.com/v3/geocode/geo"
+WALKING_URL = "https://restapi.amap.com/v3/direction/walking"
 DRIVING_URL = "https://restapi.amap.com/v5/direction/driving"
 TRANSIT_URL = "https://restapi.amap.com/v5/direction/transit/integrated"
 
@@ -24,6 +25,15 @@ _ROUTE_CACHE: dict[tuple[str, str, CommuteMode], float | None] = {}
 class AmapResult:
     ok: bool
     data: dict[str, Any] | None
+    error: str | None = None
+
+
+@dataclass
+class WalkingRouteResult:
+    ok: bool
+    duration_minutes: float | None = None
+    distance_meters: float | None = None
+    status: str = "api_error"
     error: str | None = None
 
 
@@ -183,3 +193,53 @@ def get_commute_minutes(origin: GeocodeLocation, destination: GeocodeLocation, m
     value = duration_seconds / 60.0
     _ROUTE_CACHE[cache_key] = value
     return value
+
+
+def get_walking_route(origin: GeocodeLocation, destination: GeocodeLocation) -> WalkingRouteResult:
+    origin_str = f"{origin[0]},{origin[1]}"
+    destination_str = f"{destination[0]},{destination[1]}"
+    result = _request_json(
+        WALKING_URL,
+        {
+            "origin": origin_str,
+            "destination": destination_str,
+        },
+    )
+    if not result.ok or not result.data:
+        error = result.error or "AMap walking route failed"
+        error_lower = error.lower()
+        quota_markers = (
+            "quota",
+            "daily",
+            "limit",
+            "cuqps_has_exceeded_the_limit",
+            "user_daily_query_over_limit",
+            "daily_query_over_limit",
+        )
+        status = "api_quota_exceeded" if any(marker in error_lower for marker in quota_markers) else "api_error"
+        return WalkingRouteResult(ok=False, status=status, error=error)
+
+    route = result.data.get("route") or {}
+    paths = route.get("paths") or []
+    if not paths:
+        return WalkingRouteResult(ok=False, status="route_not_found", error="No walking route path returned")
+
+    path = paths[0]
+    duration_seconds = _extract_duration_seconds(path)
+    distance_meters = None
+    try:
+        raw_distance = path.get("distance")
+        if raw_distance is not None:
+            distance_meters = float(raw_distance)
+    except (TypeError, ValueError):
+        distance_meters = None
+
+    if duration_seconds is None:
+        return WalkingRouteResult(ok=False, status="invalid_response", error="Walking route duration missing")
+    return WalkingRouteResult(
+        ok=True,
+        duration_minutes=duration_seconds / 60.0,
+        distance_meters=distance_meters,
+        status="ok",
+        error=None,
+    )

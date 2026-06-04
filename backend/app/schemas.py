@@ -19,6 +19,7 @@ class DistrictMetricOut(BaseModel):
     activity_norm: float
     price_norm: float
     livability_score: float
+    livability_score_display: float | None = None
     poi_diversity: float
     shopping_per_house: float
     traffic_per_house: float
@@ -27,9 +28,13 @@ class DistrictMetricOut(BaseModel):
     company_per_house: float
     cost_pressure: float
     affordability_score: float
+    affordability_score_display: float | None = None
     service_score: float
+    service_score_display: float | None = None
     vitality_score: float
+    vitality_score_display: float | None = None
     livability_score_v2: float
+    livability_score_v2_display: float | None = None
     shopping_access: float
     traffic_access: float
     healthcare_access: float
@@ -38,24 +43,34 @@ class DistrictMetricOut(BaseModel):
     nearest_traffic_distance: float | None = None
     nearest_healthcare_distance: float | None = None
     access_score: float
+    access_score_display: float | None = None
     value_score: float
+    value_score_display: float | None = None
     shopping_e2sfca_access: float
     traffic_e2sfca_access: float
     healthcare_e2sfca_access: float
     recreation_e2sfca_access: float
     company_e2sfca_access: float
     e2sfca_access_score: float
+    e2sfca_access_score_display: float | None = None
     e2sfca_value_score: float
+    e2sfca_value_score_display: float | None = None
     sample_reliability_score: float
     calibrated_score: float
+    calibrated_score_display: float | None = None
     life_circle_5min_score: float
+    life_circle_5min_score_display: float | None = None
     life_circle_10min_score: float
+    life_circle_10min_score_display: float | None = None
     life_circle_15min_score: float
+    life_circle_15min_score_display: float | None = None
     life_circle_score: float
+    life_circle_score_display: float | None = None
     life_circle_5min_coverage: float
     life_circle_10min_coverage: float
     life_circle_15min_coverage: float
     calibrated_score_life_circle: float
+    calibrated_score_life_circle_display: float | None = None
     center_lng: float | None = None
     center_lat: float | None = None
 
@@ -87,6 +102,7 @@ class StreetMetricOut(BaseModel):
     activity_norm: float
     price_norm: float
     livability_score: float
+    livability_score_display: float | None = None
     poi_diversity: float
     shopping_per_house: float
     traffic_per_house: float
@@ -95,9 +111,13 @@ class StreetMetricOut(BaseModel):
     company_per_house: float
     cost_pressure: float
     affordability_score: float
+    affordability_score_display: float | None = None
     service_score: float
+    service_score_display: float | None = None
     vitality_score: float
+    vitality_score_display: float | None = None
     livability_score_v2: float
+    livability_score_v2_display: float | None = None
     shopping_access: float
     traffic_access: float
     healthcare_access: float
@@ -106,28 +126,72 @@ class StreetMetricOut(BaseModel):
     nearest_traffic_distance: float | None = None
     nearest_healthcare_distance: float | None = None
     access_score: float
+    access_score_display: float | None = None
     value_score: float
+    value_score_display: float | None = None
     shopping_e2sfca_access: float
     traffic_e2sfca_access: float
     healthcare_e2sfca_access: float
     recreation_e2sfca_access: float
     company_e2sfca_access: float
     e2sfca_access_score: float
+    e2sfca_access_score_display: float | None = None
     e2sfca_value_score: float
+    e2sfca_value_score_display: float | None = None
     sample_reliability_score: float
     calibrated_score: float
+    calibrated_score_display: float | None = None
     life_circle_5min_score: float
+    life_circle_5min_score_display: float | None = None
     life_circle_10min_score: float
+    life_circle_10min_score_display: float | None = None
     life_circle_15min_score: float
+    life_circle_15min_score_display: float | None = None
     life_circle_score: float
+    life_circle_score_display: float | None = None
     life_circle_5min_coverage: float
     life_circle_10min_coverage: float
     life_circle_15min_coverage: float
     calibrated_score_life_circle: float
+    calibrated_score_life_circle_display: float | None = None
     center_lng: float | None = None
     center_lat: float | None = None
 
     model_config = {"from_attributes": True}
+
+
+class RouteStreetMetricOut(BaseModel):
+    district: str
+    street: str
+    sample_house_count: int
+    route_expected_count: int
+    route_success_count: int
+    route_cache_hit_count: int
+    route_success_rate: float
+    route_sample_reliability_score: float
+    life_circle_5min_score_route: float
+    life_circle_5min_score_route_display: float | None = None
+    life_circle_10min_score_route: float
+    life_circle_10min_score_route_display: float | None = None
+    life_circle_15min_score_route: float
+    life_circle_15min_score_route_display: float | None = None
+    life_circle_score_route: float
+    life_circle_score_route_display: float | None = None
+    calibrated_score_life_circle_route: float
+    calibrated_score_life_circle_route_display: float | None = None
+    life_circle_score_delta: float
+    calibrated_score_delta: float
+    old_rank: int
+    route_rank: int
+    rank_delta: int
+
+
+class CommunityMetricOut(BaseModel):
+    district: str
+    street: str | None = None
+    community_name: str
+    house_count: int
+    avg_price: float
 
 
 class SummaryOut(BaseModel):

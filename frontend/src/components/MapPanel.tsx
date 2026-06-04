@@ -1,6 +1,6 @@
 import { Loader2 } from "lucide-react";
 import { memo, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
-import { normalizeDistrictName } from "../lib/utils";
+import { displayScore, formatScore, normalizeDistrictName } from "../lib/utils";
 import type { DistrictMetric, StreetMetric } from "../types/metrics";
 
 declare global {
@@ -17,7 +17,7 @@ type MapPanelProps = {
   onSelectDistrict: (district: string) => void;
 };
 
-type MapMode = "calibrated" | "lifeCircle" | "e2sfca" | "robust" | "access" | "value" | "price" | "poi" | "activity";
+type MapMode = "calibrated" | "lifeCircle" | "e2sfca" | "robust" | "access" | "value" | "price" | "poi";
 type DistrictBoundary = {
   name: string;
   adcode?: string;
@@ -61,48 +61,48 @@ const mapModes: Record<
     unit: "",
     low: "#dcfce7",
     high: "#15803d",
-    value: (item) => item.calibrated_score_life_circle ?? 0,
-    format: (value) => value.toFixed(3)
+    value: (item) => displayScore(item, "calibrated_score_life_circle"),
+    format: formatScore
   },
   lifeCircle: {
     label: "生活圈",
     unit: "",
     low: "#ede9fe",
     high: "#7c3aed",
-    value: (item) => item.life_circle_score ?? 0,
-    format: (value) => value.toFixed(3)
+    value: (item) => displayScore(item, "life_circle_score"),
+    format: formatScore
   },
   e2sfca: {
-    label: "供需可达性",
+    label: "设施供需充足度",
     unit: "",
     low: "#e0f2fe",
     high: "#0284c7",
-    value: (item) => item.e2sfca_access_score ?? 0,
-    format: (value) => value.toFixed(3)
+    value: (item) => displayScore(item, "e2sfca_access_score"),
+    format: formatScore
   },
   robust: {
     label: "稳健评分",
     unit: "",
     low: "#fee2e2",
     high: "#ef4444",
-    value: (item) => item.livability_score_v2 ?? 0,
-    format: (value) => value.toFixed(3)
+    value: (item) => displayScore(item, "livability_score_v2"),
+    format: formatScore
   },
   access: {
     label: "可达性",
     unit: "",
     low: "#dbeafe",
     high: "#2563eb",
-    value: (item) => item.access_score ?? 0,
-    format: (value) => value.toFixed(3)
+    value: (item) => displayScore(item, "access_score"),
+    format: formatScore
   },
   value: {
     label: "性价比",
     unit: "",
     low: "#dcfce7",
     high: "#16a34a",
-    value: (item) => item.value_score ?? 0,
-    format: (value) => value.toFixed(3)
+    value: (item) => displayScore(item, "value_score"),
+    format: formatScore
   },
   price: {
     label: "房价",
@@ -119,18 +119,10 @@ const mapModes: Record<
     high: "#f97316",
     value: (item) => item.poi_total,
     format: (value) => `${Math.round(value / 1000)}k`
-  },
-  activity: {
-    label: "商圈活跃度",
-    unit: "",
-    low: "#fef3c7",
-    high: "#ef4444",
-    value: (item) => item.business_activity,
-    format: (value) => Math.round(value).toLocaleString("zh-CN")
   }
 };
 
-const visibleMapModes: MapMode[] = ["calibrated", "lifeCircle", "price", "poi", "activity"];
+const visibleMapModes: MapMode[] = ["calibrated", "lifeCircle", "price", "poi"];
 
 function hexToRgb(hex: string) {
   const normalized = hex.replace("#", "");
@@ -226,18 +218,13 @@ const MapPanel = memo(function MapPanel({ districts, selectedDistrict, recommend
     return map;
   }, [streetMetrics]);
 
-  const heatmapMetrics = useMemo(
-    () => (showStreetBoundaries && streetMetrics.length > 0 ? streetMetrics : districts),
-    [districts, showStreetBoundaries, streetMetrics]
-  );
-
   const modeStats = useMemo(() => {
     const config = mapModes[mapMode];
-    const values = heatmapMetrics.map(config.value).filter((value) => Number.isFinite(value));
+    const values = districts.map(config.value).filter((value) => Number.isFinite(value));
     const min = values.length ? Math.min(...values) : 0;
     const max = values.length ? Math.max(...values) : 1;
     return { min, max, config };
-  }, [heatmapMetrics, mapMode]);
+  }, [districts, mapMode]);
 
   const recommendationNames = useMemo(() => new Set(recommendations.map((item) => item.district)), [recommendations]);
 
@@ -405,12 +392,12 @@ const MapPanel = memo(function MapPanel({ districts, selectedDistrict, recommend
                           <div>房价: <b>${Math.round(metric.avg_price).toLocaleString("zh-CN")} 元/㎡</b></div>
                           <div>POI: <b>${metric.poi_total.toLocaleString("zh-CN")}</b></div>
                           <div>商圈活跃度: <b>${metric.business_activity.toFixed(1)}</b></div>
-                          <div>校准评分: <b>${(metric.calibrated_score_life_circle ?? 0).toFixed(3)}</b></div>
-                          <div>生活圈: <b>${(metric.life_circle_score ?? 0).toFixed(3)}</b></div>
-                          <div>5/10/15分钟: <b>${(metric.life_circle_5min_score ?? 0).toFixed(3)} / ${(metric.life_circle_10min_score ?? 0).toFixed(3)} / ${(metric.life_circle_15min_score ?? 0).toFixed(3)}</b></div>
-                          <div>供需可达性: <b>${(metric.e2sfca_access_score ?? 0).toFixed(3)}</b></div>
-                          <div>可达性分: <b>${(metric.access_score ?? 0).toFixed(3)}</b></div>
-                          <div>性价比分: <b>${(metric.value_score ?? 0).toFixed(3)}</b></div>
+                          <div>校准评分: <b>${formatScore(displayScore(metric, "calibrated_score_life_circle"))}</b></div>
+                          <div>生活圈总分: <b>${formatScore(displayScore(metric, "life_circle_score"))}</b></div>
+                          <div>5/10/15分钟: <b>${formatScore(displayScore(metric, "life_circle_5min_score"))} / ${formatScore(displayScore(metric, "life_circle_10min_score"))} / ${formatScore(displayScore(metric, "life_circle_15min_score"))}</b></div>
+                          <div>设施供需充足度: <b>${formatScore(displayScore(metric, "e2sfca_access_score"))}</b></div>
+                          <div>可达性分: <b>${formatScore(displayScore(metric, "access_score"))}</b></div>
+                          <div>性价比分: <b>${formatScore(displayScore(metric, "value_score"))}</b></div>
                           ${(metric.sample_reliability_score ?? 1) < 1 ? `<div>样本不足，评分已降权</div>` : ""}
                         </div>`
                       : `<div class="map-tooltip">
@@ -470,12 +457,12 @@ const MapPanel = memo(function MapPanel({ districts, selectedDistrict, recommend
                       <div class="map-tooltip-title">${name}</div>
                       <div>平均房价: <b>${Math.round(metric.avg_price).toLocaleString("zh-CN")} 元/㎡</b></div>
                       <div>POI: <b>${metric.poi_total.toLocaleString("zh-CN")}</b></div>
-                      <div>稳健评分: <b>${(metric.livability_score_v2 ?? 0).toFixed(3)}</b></div>
-                      <div>校准评分: <b>${(metric.calibrated_score_life_circle ?? 0).toFixed(3)}</b></div>
-                      <div>生活圈: <b>${(metric.life_circle_score ?? 0).toFixed(3)}</b></div>
-                      <div>5/10/15分钟: <b>${(metric.life_circle_5min_score ?? 0).toFixed(3)} / ${(metric.life_circle_10min_score ?? 0).toFixed(3)} / ${(metric.life_circle_15min_score ?? 0).toFixed(3)}</b></div>
-                      <div>供需可达性: <b>${(metric.e2sfca_access_score ?? 0).toFixed(3)}</b></div>
-                      <div>可达性分: <b>${(metric.access_score ?? 0).toFixed(3)}</b></div>
+                      <div>稳健评分: <b>${formatScore(displayScore(metric, "livability_score_v2"))}</b></div>
+                      <div>校准评分: <b>${formatScore(displayScore(metric, "calibrated_score_life_circle"))}</b></div>
+                      <div>生活圈总分: <b>${formatScore(displayScore(metric, "life_circle_score"))}</b></div>
+                      <div>5/10/15分钟: <b>${formatScore(displayScore(metric, "life_circle_5min_score"))} / ${formatScore(displayScore(metric, "life_circle_10min_score"))} / ${formatScore(displayScore(metric, "life_circle_15min_score"))}</b></div>
+                      <div>设施供需充足度: <b>${formatScore(displayScore(metric, "e2sfca_access_score"))}</b></div>
+                      <div>可达性分: <b>${formatScore(displayScore(metric, "access_score"))}</b></div>
                       ${(metric.sample_reliability_score ?? 1) < 1 ? `<div>样本不足，评分已降权</div>` : ""}
                     </div>`
                   );

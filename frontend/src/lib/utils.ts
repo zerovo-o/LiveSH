@@ -1,5 +1,6 @@
 import { clsx, type ClassValue } from "clsx";
 import { twMerge } from "tailwind-merge";
+import type { DistrictMetric } from "../types/metrics";
 
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -14,13 +15,25 @@ export function formatPrice(value: number) {
 }
 
 export function formatScore(value: number) {
-  return value.toFixed(3);
+  return Number.isFinite(value) ? value.toFixed(1) : "暂无";
+}
+
+export function formatPercent(value: number) {
+  return Number.isFinite(value) ? `${(value * 100).toFixed(1)}%` : "暂无";
+}
+
+export function displayScore<T extends DistrictMetric>(item: T, field: keyof DistrictMetric) {
+  const displayField = `${String(field)}_display` as keyof DistrictMetric;
+  const displayValue = Number(item[displayField]);
+  if (Number.isFinite(displayValue)) return displayValue;
+  const rawValue = Number(item[field]);
+  return Number.isFinite(rawValue) ? rawValue * 10 : 0;
 }
 
 export function scoreColor(score: number) {
-  if (score >= 0.45) return "#15803d";
-  if (score >= 0.2) return "#22c55e";
-  if (score >= 0) return "#a3e635";
-  if (score >= -0.25) return "#f59e0b";
+  if (score >= 8) return "#15803d";
+  if (score >= 6.5) return "#22c55e";
+  if (score >= 5) return "#a3e635";
+  if (score >= 4) return "#f59e0b";
   return "#ef4444";
 }
