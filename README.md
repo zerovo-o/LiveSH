@@ -11,25 +11,27 @@ LiveSH 是一个面向上海居住选择分析的 WebGIS 可视化系统。项�
 - 5 / 10 / 15 分钟生活圈覆盖
 - 样本数量带来的结果可信度
 
-最终通过地图、指标卡片、图表和街镇明细，把“哪里更值得推荐”以及“为什么值得推荐”一起展示出来。
+最终通过地图、指标卡片、图表、街镇明细、小区列表和个性化 Agent，把“哪里更值得推荐”“为什么值得推荐”以及“在某个预算和通勤约束下优先看哪里”一起展示出来。
 
 ## 项目现在能做什么
 
 - **首页叙事与 GIS 入口**：用产品化首屏说明项目目标、数据对象和评分逻辑，并可平滑进入地图主视图。
 - **区级专题地图**：支持查看校准评分、生活圈、房价、POI 总量、商圈活跃度等专题图层。
 - **街道/镇精细分析**：可按行政区筛选、搜索街道/镇，并查看生活圈、设施供需充足度、最近交通/医疗距离等细粒度指标。
+- **小区查询与街镇下钻**：街镇模块会同步加载小区聚合信息，可按行政区、街镇和关键词查看小区房源数量与均价。
 - **推荐区域 Top5**：按当前默认推荐分 `calibrated_score_life_circle` 排序，并对低样本结果做降权处理。
-- **多维可视化分析**：展示房价排名、POI 结构、评分分布、相关性、象限关系、雷达对比等图表。
+- **多维可视化分析**：展示房价排名、箱线图、POI 结构、评分分布、相关性、象限关系、聚类、相似度网络、雷达对比等图表，并支持 AI 图表结论。
+- **杨浦真实路网试算**：提供高德步行路线抽样脚本和杨浦街镇生活圈对比接口，用于比较“平面距离近似”和“真实步行时间”的差异。
 - **联动交互**：点击地图、推荐卡片、区域项后，地图、指标面板和图表会同步更新。
 - **个性化 Agent 推荐**：用户输入预算、目标面积、工作地点、通勤方式和偏好权重后，后端返回街镇、小区和房源 ID 推荐，并可结合高德路线与 LLM 重排。
-- **AI 居住建议模块**：前后端接口已具备，目前返回规则占位结果，代码中预留了后续接入真实大模型的位置。
+- **AI 辅助说明**：区域居住建议接口目前返回规则占位结果；图表结论接口可配置 DeepSeek，不配置时返回本地兜底结论。
 
 ## 技术栈
 
 | 层级 | 技术 |
 | --- | --- |
 | 前端 | React 18、Vite、TypeScript、Tailwind CSS、shadcn/ui、ECharts |
-| 后端 | FastAPI、SQLAlchemy、pandas、SciPy、pyproj、pyshp |
+| 后端 | FastAPI、SQLAlchemy、pandas、SciPy、pyproj、pyshp、certifi |
 | 数据库 | SQLite（默认），可切换 PostgreSQL |
 | GIS | 高德地图 JS API、GCJ-02 / WGS84 坐标转换 |
 
@@ -43,7 +45,7 @@ LiveSH/
 │   ├── sh_house_dataset_raw.parquet
 │   ├── sh_street_boundary/
 │   └── README.md
-├── docs/                     # 课程说明文档
+├── docs/                     # 项目说明、接口、指标、GIS 与可视化文档
 ├── frontend/                 # React + Vite 前端
 └── README.md
 ```
@@ -163,6 +165,9 @@ AMAP_WEB_SERVICE_KEY=你的高德 Web 服务 Key
 LLM_API_KEY=
 LLM_BASE_URL=
 LLM_MODEL=
+DEEPSEEK_API_KEY=
+DEEPSEEK_BASE_URL=https://api.deepseek.com
+DEEPSEEK_MODEL=deepseek-v4-flash
 LLM_RERANK_ENABLED=
 LLM_RERANK_WEIGHT=0.3
 LLM_RERANK_TIMEOUT_SEC=60
@@ -171,7 +176,7 @@ RECOMMENDER_VERSION=v3
 ```
 
 如果不配置 `DATABASE_URL`，后端默认使用本地 SQLite 数据库。
-`AMAP_WEB_SERVICE_KEY` 会用于个性化推荐中的工作地点地理编码和通勤路线估计；LLM 相关变量为空时，推荐接口仍会使用规则模型返回结果，只是不启用大模型重排。
+`AMAP_WEB_SERVICE_KEY` 会用于行政边界兜底、个性化推荐中的工作地点地理编码、通勤路线估计，以及真实步行路线抽样脚本。LLM 相关变量为空时，推荐接口仍会使用规则模型返回结果，只是不启用大模型重排。DeepSeek 相关变量用于图表 AI 结论；未配置时返回本地兜底结论。
 
 ### 2. 启动后端
 
@@ -223,10 +228,15 @@ Vite 已把 `/api` 和 `/health` 代理到 `127.0.0.1:8000`，因此本地开发
 | `GET /api/districts` | 区级指标列表 |
 | `GET /api/districts/{district}` | 单个行政区指标 |
 | `GET /api/streets` | 街道/镇指标列表，可按 `district` 过滤 |
+| `GET /api/streets/route-life-circle/yangpu` | 杨浦街镇真实步行路线生活圈试算结果 |
 | `GET /api/streets/{district}/{street}` | 单个街道/镇指标 |
+| `GET /api/communities` | 小区聚合列表，可按 `district`、`street`、`q` 过滤 |
 | `GET /api/amap/shanghai-districts` | 上海区级边界 |
 | `GET /api/amap/shanghai-streets` | 上海街镇边界 |
+| `GET /api/pois/heatmap` | POI 热力点，可按 `category` 过滤 |
+| `GET /api/houses/heatmap` | 房源热力点 |
 | `POST /api/ai/advice` | AI 居住建议接口 |
+| `POST /api/ai/chart-insight` | 图表 AI 结论接口，支持 DeepSeek 或本地兜底 |
 | `POST /api/agent/recommend-houses` | 个性化街镇、小区和房源推荐接口 |
 
 ## 地图与坐标约定
@@ -241,15 +251,15 @@ Vite 已把 `/api` 和 `/health` 代理到 `127.0.0.1:8000`，因此本地开发
 
 ## 当前限制与注意事项
 
-- `AI 居住建议` 模块目前仍是占位实现，真实大模型调用尚未接入。
+- `AI 居住建议` 模块目前仍是占位实现；图表 AI 结论可接 DeepSeek，也有本地兜底。
 - 如果缺少 `data/sh_poi_raw/`，系统无法完整计算 POI 细分、设施供需充足度和生活圈指标。
 - 街道/镇推荐列表当前默认只展示房源数不少于 50 的样本，以减少小样本误导。
-- 旧文档中的部分说明仍基于早期“区级简单评分”版本，如需课程汇报，建议优先以本 README 和实际代码为准。
+- 杨浦真实步行路线生活圈目前是抽样试算，不直接替代全市默认评分。
 
 ## 相关文档
 
 - [数据说明](data/README.md)
-- [功能说明入口](docs/功能说明.md)
+- [文档目录](docs/README.md)
 - [后端接口说明](docs/后端接口说明.md)
 - [前端功能说明](docs/前端功能说明.md)
 - [地图 GIS 与高德配置](docs/地图GIS与高德配置.md)

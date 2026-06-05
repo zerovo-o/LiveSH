@@ -8,6 +8,18 @@ import type { DistrictMetric, RouteStreetMetric, StreetMetric } from "../types/m
 const MIN_HOUSE_COUNT = 50;
 
 const axisText = { color: "#7b6758", fontSize: 11 };
+const xAxisName = {
+  nameLocation: "middle" as const,
+  nameGap: 34,
+  nameTextStyle: axisText,
+  axisLabel: axisText,
+};
+const yAxisName = {
+  nameLocation: "middle" as const,
+  nameGap: 46,
+  nameTextStyle: axisText,
+  axisLabel: axisText,
+};
 
 const gradientColors = ["#22c55e", "#84cc16", "#eab308", "#f97316", "#ef4444"];
 
@@ -61,12 +73,12 @@ function stripPlotOption(
       symbolSize: isSel ? 14 : 4,
       label: isSel ? {
         show: true,
-        position: "top",
+        position: "top" as const,
         distance: 10,
         formatter: `{b}\n${formatScore(displayScore(s, metricKey))}`,
         color: rankColor(i + 1, total),
         fontSize: 11,
-        fontWeight: "bold",
+        fontWeight: "bold" as const,
         lineHeight: 16,
       } : undefined,
     };
@@ -80,8 +92,8 @@ function stripPlotOption(
       text: `${label}`,
       subtext: `排名 ${rank}/${total}（前 ${rankPct(rank, total)}%）· ${rankLabel(rank, total)}`,
       left: 0, top: 0,
-      textStyle: { fontSize: 14, color: "#33251f", fontWeight: "bold" },
-      subtextStyle: { fontSize: 12, color: rankColor(rank, total), fontWeight: "bold" },
+      textStyle: { fontSize: 14, color: "#33251f", fontWeight: "bold" as const },
+      subtextStyle: { fontSize: 12, color: rankColor(rank, total), fontWeight: "bold" as const },
     },
     tooltip: {
       trigger: "item",
@@ -104,9 +116,9 @@ function stripPlotOption(
           value: [selVal, 0], symbol: "roundRect", symbolSize: [3, 36],
           itemStyle: { color: rankColor(rank, total) },
           label: {
-            show: true, position: "bottom", distance: 8,
+            show: true, position: "bottom" as const, distance: 8,
             formatter: `#${rank}`,
-            color: rankColor(rank, total), fontSize: 12, fontWeight: "bold",
+            color: rankColor(rank, total), fontSize: 12, fontWeight: "bold" as const,
           },
         }],
         z: 10,
@@ -139,24 +151,24 @@ function comboScatterOption(
       symbolSize: isSel ? 14 : 5,
       label: isSel ? {
         show: true,
-        position: "top",
+        position: "top" as const,
         distance: 8,
         formatter: `${s.street}\n校准 ${formatScore(displayScore(s, "calibrated_score_life_circle"))} · 生活圈 ${formatScore(displayScore(s, "life_circle_score"))}`,
         color: "#1d4ed8",
         fontSize: 11,
-        fontWeight: "bold",
+        fontWeight: "bold" as const,
         lineHeight: 16,
       } : undefined,
     };
   });
 
   return {
-    grid: { top: 44, left: 60, right: 40, bottom: 52 },
+    grid: { top: 76, left: 68, right: 34, bottom: 66, containLabel: true },
     title: {
       text: "校准评分 vs 生活圈总分",
       subtext: `校准排名 ${calRank}/${total} · 生活圈排名 ${lcRank}/${total}`,
       left: 0, top: 0,
-      textStyle: { fontSize: 14, color: "#33251f", fontWeight: "bold" },
+      textStyle: { fontSize: 14, color: "#33251f", fontWeight: "bold" as const },
       subtextStyle: { fontSize: 12, color: "#6b5345" },
     },
     tooltip: {
@@ -167,11 +179,11 @@ function comboScatterOption(
       },
     },
     xAxis: {
-      type: "value", name: "校准评分", nameTextStyle: axisText, axisLabel: axisText,
+      type: "value", name: "校准评分", ...xAxisName,
       splitLine: { lineStyle: { color: "#f0e4d4" } },
     },
     yAxis: {
-      type: "value", name: "生活圈总分", nameTextStyle: axisText, axisLabel: axisText,
+      type: "value", name: "生活圈总分", ...yAxisName,
       splitLine: { lineStyle: { color: "#f0e4d4" } },
     },
     series: [{ type: "scatter", data, emphasis: { focus: "series" } }],
@@ -203,10 +215,10 @@ function deltaBarOption(
   const labels = sorted.map((s) => s.street);
 
   return {
-    grid: { top: 28, left: 52, right: 24, bottom: 42 },
-    title: { text: title, left: 0, top: 0, textStyle: { fontSize: 13, color: "#33251f", fontWeight: "bold" } },
+    grid: { top: 52, left: 52, right: 24, bottom: 76, containLabel: true },
+    title: { text: title, left: 0, top: 0, textStyle: { fontSize: 13, color: "#33251f", fontWeight: "bold" as const } },
     tooltip: { trigger: "axis" },
-    legend: { bottom: 0, data: ["默认版", "步行路网2.0"], textStyle: axisText },
+    legend: { top: 0, right: 8, data: ["默认版", "步行路网2.0"], textStyle: axisText },
     xAxis: { type: "category", data: labels, axisLabel: { ...axisText, rotate: 35 }, axisTick: { alignWithLabel: true } },
     yAxis: { type: "value", axisLabel: axisText, splitLine: { lineStyle: { color: "#f0e4d4" } } },
     series: [

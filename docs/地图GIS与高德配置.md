@@ -8,6 +8,8 @@
 - 本地街道/镇边界展示
 - 行政区点击选中
 - 区级推荐结果高亮
+- 街镇边界叠加与街镇级着色
+- POI 和房源热力接口已在后端提供，前端可继续扩展为热力图层
 - 主题切换：
   - 校准评分
   - 生活圈
@@ -48,6 +50,20 @@ cp backend/.env.example backend/.env
 AMAP_WEB_SERVICE_KEY=你的高德 Web 服务 Key
 ```
 
+后端会在以下场景使用 Web 服务 Key：
+
+- 行政区边界接口无法使用本地边界时，请求高德行政区服务兜底。
+- 个性化 Agent 推荐中，对工作地点进行地理编码，并计算公交或驾车通勤时间。
+- `sample_walking_routes.py` 中，对抽样房源和 POI 调用步行路线规划，生成真实路网生活圈试算结果。
+
+图表 AI 结论不依赖高德 Key，而依赖 DeepSeek 配置：
+
+```text
+DEEPSEEK_API_KEY=
+DEEPSEEK_BASE_URL=https://api.deepseek.com
+DEEPSEEK_MODEL=deepseek-v4-flash
+```
+
 ## 常见排查
 
 如果地图加载失败，优先检查：
@@ -57,3 +73,10 @@ AMAP_WEB_SERVICE_KEY=你的高德 Web 服务 Key
 3. 当前域名是否在白名单内
 4. 后端是否正常提供 `/api/amap/shanghai-districts`
 5. 本地街镇边界数据是否完整
+
+如果个性化推荐的通勤结果为空，优先检查：
+
+1. `AMAP_WEB_SERVICE_KEY` 是否为 Web 服务 Key，而不是前端 Web JS Key
+2. 工作地点是否能被高德地理编码识别
+3. 高德路线服务是否达到调用额度
+4. 后端日志中是否出现 `amap_route_failure_count`

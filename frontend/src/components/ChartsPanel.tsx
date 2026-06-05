@@ -47,6 +47,18 @@ type ChartClickParam = Parameters<NonNullable<ComponentProps<typeof EChart>["onC
 
 const axisText = { color: "#7b6758", fontSize: 11 };
 const grid = { top: 20, left: 46, right: 18, bottom: 46 };
+const xAxisName = {
+  nameLocation: "middle" as const,
+  nameGap: 34,
+  nameTextStyle: axisText,
+  axisLabel: axisText
+};
+const yAxisName = {
+  nameLocation: "middle" as const,
+  nameGap: 46,
+  nameTextStyle: axisText,
+  axisLabel: axisText
+};
 const palette = {
   primary: "#ff8a5c",
   warm: "#f59e0b",
@@ -242,15 +254,15 @@ const ChartsPanel = memo(function ChartsPanel({
     const avgPrice = average(scatter, "avg_price");
     const avgActivity = average(scatter, "business_activity");
     return {
-      grid: { top: 24, left: 54, right: 60, bottom: 46 },
+      grid: { top: 36, left: 64, right: 34, bottom: 64, containLabel: true },
       tooltip: {
         formatter: (params: unknown) => {
           const data = readPointTooltipData(params);
           return `${data.name}<br/>房价 ${Math.round(data.value[0]).toLocaleString("zh-CN")} 元/㎡<br/>商圈活跃度 ${data.value[1].toFixed(1)}<br/>POI ${Math.round(data.value[2]).toLocaleString("zh-CN")}<br/>生活圈 ${data.value[3]?.toFixed(3) ?? "-"}`;
         }
       },
-      xAxis: { type: "value", name: "平均房价", nameTextStyle: axisText, axisLabel: axisText },
-      yAxis: { type: "value", name: "商圈活跃度", nameTextStyle: axisText, axisLabel: axisText },
+      xAxis: { type: "value", name: "平均房价", ...xAxisName },
+      yAxis: { type: "value", name: "商圈活跃度", ...yAxisName },
       series: [{
         type: "scatter",
         symbolSize: (value: number[]) => Math.max(10, Math.min(34, Math.sqrt(value[2]) / 12)),
@@ -322,7 +334,7 @@ const ChartsPanel = memo(function ChartsPanel({
     const clusterNames = ["核心便利区", "均衡宜居区", "实惠潜力区", "价值洼地区"];
     const clusterProfile = labels.map((c) => clusterNames[c]);
     return {
-      grid: { top: 24, left: 54, right: 36, bottom: 46 },
+      grid: { top: 32, left: 58, right: 28, bottom: 58, containLabel: true },
       tooltip: {
         formatter: (params: unknown) => {
           const idx = readNumericField(params, "dataIndex");
@@ -331,8 +343,8 @@ const ChartsPanel = memo(function ChartsPanel({
           return `${d.district}<br/>簇: ${clusterProfile[idx]}<br/>评分 ${d.calibrated_score_life_circle.toFixed(3)}<br/>房价 ${Math.round(d.avg_price).toLocaleString("zh-CN")} 元/㎡`;
         }
       },
-      xAxis: { type: "value", name: "PC1", nameTextStyle: axisText, axisLabel: axisText },
-      yAxis: { type: "value", name: "PC2", nameTextStyle: axisText, axisLabel: axisText },
+      xAxis: { type: "value", name: "PC1", ...xAxisName },
+      yAxis: { type: "value", name: "PC2", ...yAxisName },
       series: [{
         type: "scatter",
         symbolSize: (value: number[]) => 12 + (value[2] ?? 0) * 20,
@@ -478,15 +490,15 @@ const ChartsPanel = memo(function ChartsPanel({
 
   // ==================== MODULE 3: 关系与网络 ====================
   const accessValueOption = useMemo<EChartsOption>(() => ({
-    grid: { top: 24, left: 58, right: 90, bottom: 46 },
+    grid: { top: 34, left: 66, right: 34, bottom: 66, containLabel: true },
     tooltip: {
       formatter: (params: unknown) => {
         const data = readPointTooltipData(params);
         return `${data.name}<br/>房价 ${Math.round(data.value[0]).toLocaleString("zh-CN")} 元/㎡<br/>供需可达性 ${data.value[1].toFixed(3)}<br/>校准评分 ${data.value[2].toFixed(3)}`;
       }
     },
-    xAxis: { type: "value", name: "平均房价 (元/㎡)", nameTextStyle: axisText, axisLabel: axisText },
-    yAxis: { type: "value", name: "供需可达性分", nameTextStyle: axisText, axisLabel: axisText },
+    xAxis: { type: "value", name: "平均房价 (元/㎡)", ...xAxisName },
+    yAxis: { type: "value", name: "供需可达性分", ...yAxisName },
     series: [{
       type: "scatter",
       symbolSize: (value: number[]) => Math.max(10, Math.min(32, (value[2] - 3) * 4)),
@@ -622,7 +634,7 @@ const ChartsPanel = memo(function ChartsPanel({
       return { label: cat.label, value: Number(diff.toFixed(1)) };
     });
     return {
-      grid: { top: 20, left: 50, right: 88, bottom: 24 },
+      grid: { top: 20, left: 54, right: 42, bottom: 60, containLabel: true },
       tooltip: {
         trigger: "axis",
         formatter: (params: unknown) => {
@@ -632,7 +644,14 @@ const ChartsPanel = memo(function ChartsPanel({
           return `${selected.district}<br/>${d.label}: ${d.value >= 0 ? "+" : ""}${d.value}% vs 全市中位数`;
         }
       },
-      xAxis: { type: "value", axisLabel: { ...axisText, formatter: "{value}%" }, name: "偏离中位数(%)", nameTextStyle: axisText },
+      xAxis: {
+        type: "value",
+        axisLabel: { ...axisText, formatter: "{value}%" },
+        name: "偏离中位数(%)",
+        nameLocation: "middle",
+        nameGap: 34,
+        nameTextStyle: axisText
+      },
       yAxis: { type: "category", data: data.map((d) => d.label), axisLabel: axisText, inverse: true },
       series: [{
         type: "bar",
@@ -672,7 +691,7 @@ const ChartsPanel = memo(function ChartsPanel({
     const slope = den ? num / den : 0;
     const intercept = yMean - slope * xMean;
     return {
-      grid: { top: 24, left: 68, right: 94, bottom: 46 },
+      grid: { top: 34, left: 72, right: 34, bottom: 66, containLabel: true },
       tooltip: {
         formatter: (params: unknown) => {
           const p = params as any;
@@ -681,8 +700,8 @@ const ChartsPanel = memo(function ChartsPanel({
           return `${data.name}<br/>距交通 ${Math.round(data.value[0])}m<br/>均价 ${Math.round(data.value[1]).toLocaleString("zh-CN")} 元/㎡`;
         }
       },
-      xAxis: { type: "value", name: "最近交通距离(m)", nameTextStyle: axisText, axisLabel: axisText },
-      yAxis: { type: "value", name: "均价(元/㎡)", nameTextStyle: axisText, axisLabel: axisText },
+      xAxis: { type: "value", name: "最近交通距离(m)", ...xAxisName },
+      yAxis: { type: "value", name: "均价(元/㎡)", ...yAxisName },
       series: [
         {
           type: "scatter",
@@ -720,11 +739,11 @@ const ChartsPanel = memo(function ChartsPanel({
       { key: "life_circle_15min_coverage" as const, label: "15分钟生活圈" }
     ];
     return {
-      grid: { top: 38, left: 46, right: 18, bottom: 46 },
+      grid: { top: 42, left: 54, right: 18, bottom: 50, containLabel: true },
       tooltip: { trigger: "axis" },
       legend: { top: 0, textStyle: axisText },
       xAxis: { type: "category", data: fields.map((f) => f.label), axisLabel: axisText },
-      yAxis: { type: "value", axisLabel: axisText, name: "覆盖率", nameTextStyle: axisText },
+      yAxis: { type: "value", name: "覆盖率", ...yAxisName },
       series: [
         { name: selected.district, type: "bar", barMaxWidth: 22, data: fields.map((f) => Number(Number(selected[f.key]).toFixed(3))), itemStyle: { color: palette.primary } },
         { name: "全市均值", type: "bar", barMaxWidth: 22, data: fields.map((f) => Number(Number(city[f.key]).toFixed(3))), itemStyle: { color: "#d8c4aa" } }
