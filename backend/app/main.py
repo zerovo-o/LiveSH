@@ -12,7 +12,12 @@ from .database import Base, engine, get_db
 from .house_recommend_schemas import HouseRecommendRequest, HouseRecommendResponse
 from .models import DistrictMetric, HouseListing, PoiCategoryMetric, PoiPoint, StreetMetric
 from .recommend_houses import recommend_houses
-from .route_life_circle import load_yangpu_route_metrics
+from .route_life_circle import (
+    has_route_metrics,
+    load_route_metrics,
+    load_route_metrics_from_db,
+    load_yangpu_route_metrics,
+)
 from .schemas import (
     AIAdviceOut,
     AIAdviceRequest,
@@ -65,8 +70,22 @@ def list_streets(district: str | None = None, db: Session = Depends(get_db)):
 
 @app.get("/api/streets/route-life-circle/yangpu", response_model=list[RouteStreetMetricOut])
 def list_yangpu_route_life_circle(db: Session = Depends(get_db)):
+    db_rows = load_route_metrics_from_db("yangpu", db)
+    if db_rows:
+        return db_rows
     reference_values = db.scalars(select(StreetMetric.calibrated_score_life_circle)).all()
     return load_yangpu_route_metrics(reference_values)
+
+
+@app.get("/api/streets/route-life-circle/{district}", response_model=list[RouteStreetMetricOut])
+def list_district_route_life_circle(district: str, db: Session = Depends(get_db)):
+    db_rows = load_route_metrics_from_db(district, db)
+    if db_rows:
+        return db_rows
+    if not has_route_metrics(district):
+        raise HTTPException(status_code=404, detail="route life-circle metrics not found")
+    reference_values = db.scalars(select(StreetMetric.calibrated_score_life_circle)).all()
+    return load_route_metrics(district, reference_values)
 
 
 @app.get("/api/streets/{district}/{street}", response_model=StreetMetricOut)

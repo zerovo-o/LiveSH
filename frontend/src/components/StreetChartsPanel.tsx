@@ -124,7 +124,7 @@ function stripPlotOption(
         z: 10,
       },
     ],
-  };
+  } as EChartsOption;
 }
 
 function comboScatterOption(
@@ -187,7 +187,7 @@ function comboScatterOption(
       splitLine: { lineStyle: { color: "#f0e4d4" } },
     },
     series: [{ type: "scatter", data, emphasis: { focus: "series" } }],
-  };
+  } as EChartsOption;
 }
 
 // --------------- 2.0 route-based chart helpers ---------------
@@ -230,6 +230,13 @@ function deltaBarOption(
 
 function streetKey(d: string, s: string) { return `${d}|${s}`; }
 
+function routeLifeCircleEndpoint(district: string | null) {
+  if (district === "杨浦" || district === "杨浦区") return "/api/streets/route-life-circle/yangpu";
+  if (district === "黄浦" || district === "黄浦区") return "/api/streets/route-life-circle/huangpu";
+  if (district === "嘉定" || district === "嘉定区") return "/api/streets/route-life-circle/jiading";
+  return null;
+}
+
 // --------------- Props & Component ---------------
 
 type Props = { district: string | null };
@@ -241,7 +248,7 @@ export default function StreetChartsPanel({ district }: Props) {
   const [error, setError] = useState<string | null>(null);
   const [selectedStreetId, setSelectedStreetId] = useState<number | null>(null);
 
-  const isYangpu = district === "杨浦";
+  const routeEndpoint = routeLifeCircleEndpoint(district);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -249,7 +256,7 @@ export default function StreetChartsPanel({ district }: Props) {
     try {
       const [streetRes, routeRes] = await Promise.all([
         fetch("/api/streets"),
-        isYangpu ? fetch("/api/streets/route-life-circle/yangpu") : Promise.resolve(null),
+        routeEndpoint ? fetch(routeEndpoint) : Promise.resolve(null),
       ]);
       if (!streetRes.ok) throw new Error(`streets API ${streetRes.status}`);
       setAllStreets((await streetRes.json()) as StreetMetric[]);
@@ -263,7 +270,7 @@ export default function StreetChartsPanel({ district }: Props) {
     } finally {
       setLoading(false);
     }
-  }, [isYangpu]);
+  }, [routeEndpoint]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -326,7 +333,7 @@ export default function StreetChartsPanel({ district }: Props) {
     [sortedByValue, selected],
   );
 
-  // ---------- 2.0 route charts (Yangpu only) ----------
+  // ---------- 2.0 route charts ----------
   const routeMap = useMemo(() => {
     const map = new Map<string, RouteStreetMetric>();
     for (const r of routeMetrics) map.set(streetKey(r.district, r.street), r);
@@ -424,7 +431,7 @@ export default function StreetChartsPanel({ district }: Props) {
                 <ChartBox option={valueOption} />
               </div>
 
-              {isYangpu && routeMetrics.length > 0 ? (
+              {routeEndpoint && routeMetrics.length > 0 ? (
                 <div className="space-y-4 rounded-xl border border-[#d8ccff] bg-[#faf8ff]/88 p-5">
                   <div className="flex items-center gap-3">
                     <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-[#ede4ff]">
@@ -432,7 +439,7 @@ export default function StreetChartsPanel({ district }: Props) {
                     </div>
                     <div>
                       <h3 className="text-base font-black text-[#33251f]">核心评分 2.0 对比</h3>
-                      <p className="text-xs text-[#8a6f5a]">基于高德步行路网实际路径时间重算 · 仅杨浦区</p>
+                      <p className="text-xs text-[#8a6f5a]">基于高德步行路网实际路径时间重算 · 当前行政区</p>
                     </div>
                   </div>
                   <div className="rounded-xl border border-[#e9dffa] bg-white/72 p-4">

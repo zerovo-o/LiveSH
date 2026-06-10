@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from sqlalchemy import Float, Integer, String
+from sqlalchemy import Float, Integer, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from .database import Base
@@ -218,6 +218,36 @@ class StreetMetric(Base):
     calibrated_score_life_circle_display: Mapped[float | None] = mapped_column(Float)
     center_lng: Mapped[float | None] = mapped_column(Float)
     center_lat: Mapped[float | None] = mapped_column(Float)
+
+
+class RouteLifeCircleMetric(Base):
+    __tablename__ = "route_life_circle_metrics"
+    __table_args__ = (UniqueConstraint("district", "street", name="uq_route_life_circle_district_street"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    district: Mapped[str] = mapped_column(String(32), index=True)
+    street: Mapped[str] = mapped_column(String(64), index=True)
+    sample_house_count: Mapped[int] = mapped_column(Integer)
+    route_expected_count: Mapped[int] = mapped_column(Integer)
+    route_success_count: Mapped[int] = mapped_column(Integer)
+    route_cache_hit_count: Mapped[int] = mapped_column(Integer)
+    route_success_rate: Mapped[float] = mapped_column(Float)
+    route_sample_reliability_score: Mapped[float] = mapped_column(Float)
+    life_circle_5min_score_route: Mapped[float] = mapped_column(Float)
+    life_circle_5min_score_route_display: Mapped[float | None] = mapped_column(Float)
+    life_circle_10min_score_route: Mapped[float] = mapped_column(Float)
+    life_circle_10min_score_route_display: Mapped[float | None] = mapped_column(Float)
+    life_circle_15min_score_route: Mapped[float] = mapped_column(Float)
+    life_circle_15min_score_route_display: Mapped[float | None] = mapped_column(Float)
+    life_circle_score_route: Mapped[float] = mapped_column(Float, index=True)
+    life_circle_score_route_display: Mapped[float | None] = mapped_column(Float)
+    calibrated_score_life_circle_route: Mapped[float] = mapped_column(Float, index=True)
+    calibrated_score_life_circle_route_display: Mapped[float | None] = mapped_column(Float)
+    life_circle_score_delta: Mapped[float] = mapped_column(Float)
+    calibrated_score_delta: Mapped[float] = mapped_column(Float)
+    old_rank: Mapped[int] = mapped_column(Integer)
+    route_rank: Mapped[int] = mapped_column(Integer, index=True)
+    rank_delta: Mapped[int] = mapped_column(Integer)
 
 
 class PoiCategoryMetric(Base):

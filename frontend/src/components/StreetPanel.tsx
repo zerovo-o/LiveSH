@@ -17,6 +17,11 @@ const ALL_VALUE = "全部区域";
 const STREET_RECOMMENDATION_MIN_HOUSE_COUNT = 50;
 const ROUTE_PANEL_TEAR_EFFECT_ENABLED = true;
 const ROUTE_PANEL_TEAR_EFFECT_MS = 980;
+const ROUTE_LIFE_CIRCLE_ENDPOINTS = [
+  "/api/streets/route-life-circle/yangpu",
+  "/api/streets/route-life-circle/huangpu",
+  "/api/streets/route-life-circle/jiading",
+];
 
 const SCORE_HELP: Record<string, string> = {
   calibrated_score_life_circle: "综合生活圈、设施供需充足度、价格和样本可信度后的最终推荐分，越高表示整体越值得优先关注。",
@@ -45,8 +50,15 @@ function streetKey(district: string, street: string) {
   return `${district}|${street}`;
 }
 
-function isYangpuDistrict(value: string | null) {
-  return value === "杨浦" || value === "杨浦区";
+function supportsRouteDistrict(value: string | null) {
+  return (
+    value === "杨浦" ||
+    value === "杨浦区" ||
+    value === "黄浦" ||
+    value === "黄浦区" ||
+    value === "嘉定" ||
+    value === "嘉定区"
+  );
 }
 
 export default function StreetPanel({ districts, selectedDistrict, onSelectDistrict }: StreetPanelProps) {
@@ -78,12 +90,14 @@ export default function StreetPanel({ districts, selectedDistrict, onSelectDistr
       const communityData = (await communityRes.json()) as CommunityMetric[];
       setStreets(streetData);
       setCommunities(communityData);
-      try {
-        const routeRes = await fetch("/api/streets/route-life-circle/yangpu");
-        setRouteMetrics(routeRes.ok ? ((await routeRes.json()) as RouteStreetMetric[]) : []);
-      } catch {
-        setRouteMetrics([]);
-      }
+      const routeResponses = await Promise.allSettled(ROUTE_LIFE_CIRCLE_ENDPOINTS.map((endpoint) => fetch(endpoint)));
+      const routeData = await Promise.all(
+        routeResponses.map(async (item) => {
+          if (item.status !== "fulfilled" || !item.value.ok) return [];
+          return (await item.value.json()) as RouteStreetMetric[];
+        }),
+      );
+      setRouteMetrics(routeData.flat());
     } catch {
       setError("街道/镇或小区数据暂不可用，请先重新运行后端入库脚本并启动 API。");
     } finally {
@@ -167,7 +181,7 @@ export default function StreetPanel({ districts, selectedDistrict, onSelectDistr
     return routeMetricByStreet.get(streetKey(selectedStreet.district, selectedStreet.street)) ?? null;
   }, [routeMetricByStreet, selectedStreet]);
 
-  const showRouteToggle = isYangpuDistrict(selectedDistrict) && Boolean(selectedRouteMetric);
+  const showRouteToggle = supportsRouteDistrict(selectedDistrict) && Boolean(selectedRouteMetric);
 
   useEffect(() => {
     if (!showRouteToggle) {
