@@ -1,4 +1,4 @@
-import type { EChartsOption } from "echarts";
+﻿import type { EChartsOption } from "echarts";
 import type { ComponentProps, ReactNode } from "react";
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Loader2, Sparkles, X } from "lucide-react";
@@ -124,7 +124,7 @@ const selectedDependentChartIds = new Set([
   "priceTop10", "scoreRanking", "quadrant", "groupedPoi", "poiStack",
   "radar", "accessValue", "perHouse", "lifeCircleCompare",
   "scoreComponent", "districtClustering", "districtSimilarity",
-  "supplyDemand", "commutePrice", "scoreWaterfall", "lifeCircleHeatmap"
+  "supplyDemand", "commutePrice", "lifeCircleHeatmap"
 ]);
 
 const ChartsPanel = memo(function ChartsPanel({
@@ -751,64 +751,6 @@ const ChartsPanel = memo(function ChartsPanel({
     };
   }, [scatter, selectedMetric]);
 
-  // Score waterfall
-  const scoreWaterfallOption = useMemo<EChartsOption>(() => {
-    const selected = selectedMetric ?? buildAverageMetric(scatter);
-    const steps = [
-      { label: "负担力", value: Number(selected.affordability_score.toFixed(4)) },
-      { label: "服务强度", value: Number(selected.service_score.toFixed(4)) },
-      { label: "区域活力", value: Number(selected.vitality_score.toFixed(4)) },
-      { label: "生活圈", value: Number(selected.life_circle_score.toFixed(4)) },
-      { label: "供需可达", value: Number(selected.e2sfca_access_score.toFixed(4)) },
-      { label: "×可靠性", value: Number(selected.sample_reliability_score.toFixed(4)) },
-      { label: "最终得分", value: Number(selected.calibrated_score_life_circle.toFixed(4)) }
-    ];
-    let running = 0;
-    const xData: string[] = [];
-    const baseData: (number | string)[] = [];
-    const riseData: (number | string)[] = [];
-    steps.forEach((step, i) => {
-      if (i < 5) {
-        xData.push(step.label);
-        baseData.push(running);
-        riseData.push(step.value);
-        running += step.value;
-      } else if (i === 5) {
-        xData.push(step.label);
-        baseData.push(0);
-        riseData.push(running * step.value);
-        running = running * step.value;
-      } else {
-        xData.push(step.label);
-        baseData.push(0);
-        riseData.push(running);
-      }
-    });
-    return {
-      grid: { top: 20, left: 52, right: 18, bottom: 42 },
-      tooltip: {
-        trigger: "axis",
-        formatter: (params: unknown) => {
-          if (!Array.isArray(params)) return "";
-          const idx = params[0]?.dataIndex ?? 0;
-          if (idx < xData.length - 1) {
-            return `${selected.district}<br/>${xData[idx]}: +${Number(riseData[idx]).toFixed(4)}<br/>累计 ${Number(baseData[idx]) + Number(riseData[idx])}`;
-          }
-          return `${selected.district}<br/>最终综合评分: ${Number(riseData[idx]).toFixed(4)}`;
-        }
-      },
-      xAxis: { type: "category", data: xData, axisLabel: { ...axisText, rotate: 25 } },
-      yAxis: { type: "value", axisLabel: axisText },
-      series: [
-        { name: "base", type: "bar", stack: "wf", data: baseData, itemStyle: { color: "transparent" }, barWidth: 22 },
-        {
-          name: "rise", type: "bar", stack: "wf", data: riseData,
-          itemStyle: { color: (p: any) => p.dataIndex === xData.length - 1 ? palette.dark : palette.accent },
-          barWidth: 22
-        }
-      ]
-    };
-  }, [scatter, selectedMetric]);
 
   const scoreComponentOption = useMemo<EChartsOption>(() => {
     const city = buildAverageMetric(scatter);
@@ -965,18 +907,6 @@ const ChartsPanel = memo(function ChartsPanel({
       lifeCircleCompare: {
         selected: lifeCircleSnapshot(selected), city_average: lifeCircleSnapshot(cityMetric)
       },
-      scoreWaterfall: {
-        selected: selected.district,
-        components: {
-          affordability: Number(displayScore(selected, "affordability_score").toFixed(1)),
-          service: Number(displayScore(selected, "service_score").toFixed(1)),
-          vitality: Number(displayScore(selected, "vitality_score").toFixed(1)),
-          life_circle: Number(displayScore(selected, "life_circle_score").toFixed(1)),
-          e2sfca: Number(displayScore(selected, "e2sfca_access_score").toFixed(1)),
-          reliability: Number(selected.sample_reliability_score.toFixed(4)),
-          final: Number(displayScore(selected, "calibrated_score_life_circle").toFixed(1))
-        }
-      },
       scoreComponent: {
         selected: scoreComponentSnapshot(selected), city_average: scoreComponentSnapshot(cityMetric)
       },
@@ -1072,9 +1002,6 @@ const ChartsPanel = memo(function ChartsPanel({
             <div className="grid grid-cols-1 gap-4">
               <ChartCard chartId="lifeCircleCompare" title="生活圈覆盖率对比" desc="5/10/15分钟生活圈覆盖率，对比选中区域与全市均值。" insightData={chartInsightData.lifeCircleCompare} insight={insights.lifeCircleCompare} loading={insightLoading.lifeCircleCompare} error={insightErrors.lifeCircleCompare} onInsight={loadChartInsight}>
                 <EChart option={lifeCircleCompareOption} className="h-80 w-full" />
-              </ChartCard>
-              <ChartCard chartId="scoreWaterfall" title="评分构成瀑布图" desc="展示最终综合评分从负担力→服务→活力→生活圈→供需可达×可靠性的逐步累积过程。" insightData={chartInsightData.scoreWaterfall} insight={insights.scoreWaterfall} loading={insightLoading.scoreWaterfall} error={insightErrors.scoreWaterfall} onInsight={loadChartInsight}>
-                <EChart option={scoreWaterfallOption} className="h-80 w-full" />
               </ChartCard>
               <ChartCard chartId="scoreComponent" title="评分维度构成" desc="展示评分子维度构成，对比选中区域与全市均值。" insightData={chartInsightData.scoreComponent} insight={insights.scoreComponent} loading={insightLoading.scoreComponent} error={insightErrors.scoreComponent} onInsight={loadChartInsight}>
                 <EChart option={scoreComponentOption} className="h-[28rem] w-full" />
@@ -1330,3 +1257,4 @@ function lifeCircleColor(score: number) {
 }
 
 export default ChartsPanel;
+
