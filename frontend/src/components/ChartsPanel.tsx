@@ -188,7 +188,7 @@ const ChartsPanel = memo(function ChartsPanel({
       } finally {
         setInsightLoading((prev) => ({ ...prev, [chartId]: false }));
       }
-    }, [insights, selectedDistrict, selectedMetric?.district]);
+    }, [insights, selectedDistrict]);
 
   // ==================== MODULE 1: 市场画像 ====================
 
@@ -317,7 +317,7 @@ const ChartsPanel = memo(function ChartsPanel({
     const cov = features.map((_, j) => features.map((__, kk) => centered.reduce((s, v) => s + v[j] * v[kk], 0) / (centered.length - 1)));
     // Power iteration for top 2 eigenvectors
     const eigen = (mat: number[][], steps = 50) => {
-      let vec = mat.map((_, i) => Math.random());
+      let vec = Array.from({ length: mat.length }, () => Math.random());
       for (let s = 0; s < steps; s++) {
         const next = mat.map((row) => row.reduce((sum, v, j) => sum + v * vec[j], 0));
         const norm = Math.sqrt(next.reduce((s, v) => s + v * v, 0));
@@ -482,7 +482,16 @@ const ChartsPanel = memo(function ChartsPanel({
       },
       series: [{
         type: "heatmap", data,
-        label: { show: true, color: "#4b3b31", fontSize: 10, formatter: (p: any) => `${(p.value[2] * 100).toFixed(0)}%` },
+        label: {
+          show: true,
+          color: "#4b3b31",
+          fontSize: 10,
+          formatter: (params: unknown) => {
+            const value = readObjectField(params, "value");
+            const coverage = Array.isArray(value) ? Number(value[2]) : 0;
+            return `${(coverage * 100).toFixed(0)}%`;
+          }
+        },
         emphasis: { itemStyle: { borderColor: palette.dark, borderWidth: 1 } }
       }]
     };
@@ -566,7 +575,7 @@ const ChartsPanel = memo(function ChartsPanel({
       for (let i = 0; i < a.length; i++) { dot += a[i] * b[i]; na += a[i] * a[i]; nb += b[i] * b[i]; }
       return dot / (Math.sqrt(na) * Math.sqrt(nb) + 1e-12);
     };
-    const nodes = scatter.map((d, i) => ({
+    const nodes = scatter.map((d) => ({
       name: d.district,
       symbolSize: 12 + Math.max(0, displayScore(d, "calibrated_score_life_circle") - 3) * 3,
       itemStyle: { color: displayScoreColor(displayScore(d, "calibrated_score_life_circle")) },
@@ -593,10 +602,15 @@ const ChartsPanel = memo(function ChartsPanel({
     return {
       tooltip: {
         formatter: (params: unknown) => {
-          const p = params as any;
-          if (p.dataType === "edge") return `${p.data.source} ↔ ${p.data.target}<br/>相似度 ${p.data.value ?? ""}`;
-          const d = scatter.find((x) => x.district === p.name);
-          return d ? `${d.district}<br/>评分 ${d.calibrated_score_life_circle.toFixed(3)}<br/>房价 ${Math.round(d.avg_price).toLocaleString("zh-CN")} 元/㎡` : p.name;
+          const dataType = readObjectField(params, "dataType");
+          const data = readObjectField(params, "data");
+          if (dataType === "edge" && isRecord(data)) {
+            return `${String(data.source ?? "")} ↔ ${String(data.target ?? "")}<br/>相似度 ${String(data.value ?? "")}`;
+          }
+          const name = readObjectField(params, "name");
+          const districtName = typeof name === "string" ? name : "";
+          const d = scatter.find((item) => item.district === districtName);
+          return d ? `${d.district}<br/>评分 ${d.calibrated_score_life_circle.toFixed(3)}<br/>房价 ${Math.round(d.avg_price).toLocaleString("zh-CN")} 元/㎡` : districtName;
         }
       },
       series: [{
@@ -639,8 +653,9 @@ const ChartsPanel = memo(function ChartsPanel({
         trigger: "axis",
         formatter: (params: unknown) => {
           const p = Array.isArray(params) ? params[0] : params;
-          const idx = (p as any)?.dataIndex ?? 0;
+          const idx = readNumericField(p, "dataIndex");
           const d = data[idx];
+          if (!d) return "";
           return `${selected.district}<br/>${d.label}: ${d.value >= 0 ? "+" : ""}${d.value}% vs 全市中位数`;
         }
       },
@@ -665,8 +680,8 @@ const ChartsPanel = memo(function ChartsPanel({
         })),
         label: {
           show: true, position: "right",
-          formatter: (p: any) => {
-            const v = Number(p.value);
+          formatter: (params: unknown) => {
+            const v = Number(readObjectField(params, "value"));
             return Number.isFinite(v) ? `${v >= 0 ? "+" : ""}${v}%` : "";
           },
           color: "#4b3b31", fontSize: 11
@@ -694,8 +709,7 @@ const ChartsPanel = memo(function ChartsPanel({
       grid: { top: 34, left: 72, right: 34, bottom: 66, containLabel: true },
       tooltip: {
         formatter: (params: unknown) => {
-          const p = params as any;
-          if (p.seriesName === "trend") return "";
+          if (readObjectField(params, "seriesName") === "trend") return "";
           const data = readPointTooltipData(params);
           return `${data.name}<br/>距交通 ${Math.round(data.value[0])}m<br/>均价 ${Math.round(data.value[1]).toLocaleString("zh-CN")} 元/㎡`;
         }
@@ -911,7 +925,7 @@ const ChartsPanel = memo(function ChartsPanel({
         selected: scoreComponentSnapshot(selected), city_average: scoreComponentSnapshot(cityMetric)
       },
     };
-  }, [cityMetric, poiCategories, priceTop10, scatter, scoreRanking, selectedMetric, shoppingTop5]);
+  }, [cityMetric, poiCategories, priceTop10, scatter, scoreRanking, selectedMetric]);
 
   return (
     <section className="rounded-[24px] border border-[#ead8c2] bg-[#fff8ea]/88 p-5 shadow-[0_18px_56px_rgba(104,72,42,0.10)] backdrop-blur">
