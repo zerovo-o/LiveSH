@@ -24,8 +24,11 @@ export function formatPercent(value: number) {
 
 export function displayScore<T extends DistrictMetric>(item: T, field: keyof DistrictMetric) {
   const displayField = `${String(field)}_display` as keyof DistrictMetric;
-  const displayValue = Number(item[displayField]);
-  if (Number.isFinite(displayValue)) return displayValue;
+  const storedDisplayValue = item[displayField];
+  if (storedDisplayValue !== null && storedDisplayValue !== undefined && storedDisplayValue !== "") {
+    const displayValue = Number(storedDisplayValue);
+    if (Number.isFinite(displayValue)) return displayValue;
+  }
   const rawValue = Number(item[field]);
   return Number.isFinite(rawValue) ? rawValue * 10 : 0;
 }

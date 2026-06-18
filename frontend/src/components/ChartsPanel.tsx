@@ -128,7 +128,7 @@ const selectedDependentChartIds = new Set([
 ]);
 
 const ChartsPanel = memo(function ChartsPanel({
-  priceTop10, poiCategories, shoppingTop5, scatter, scoreRanking,
+  priceTop10, poiCategories, scatter, scoreRanking,
   selectedDistrict, onSelectDistrict
 }: ChartsPanelProps) {
   const [activeModule, setActiveModule] = useState<ModuleId>("market");
@@ -168,7 +168,7 @@ const ChartsPanel = memo(function ChartsPanel({
     async (chartId: string, title: string, description: string | undefined,
            data: Record<string, unknown>, scope?: string,
            selectedDistrictForInsight?: string | null) => {
-      if (insights[chartId]) return;
+      if (insights[chartId] && !insights[chartId].is_placeholder) return;
       setInsightLoading((prev) => ({ ...prev, [chartId]: true }));
       setInsightErrors((prev) => { const next = { ...prev }; delete next[chartId]; return next; });
       try {
@@ -213,10 +213,17 @@ const ChartsPanel = memo(function ChartsPanel({
       return prices;
     });
     return {
-      grid: { top: 20, left: 48, right: 18, bottom: 52 },
+      grid: { top: 42, left: 64, right: 18, bottom: 52, containLabel: true },
       tooltip: { trigger: "item" },
       xAxis: { type: "category", data: rows.map((d) => d.district), axisLabel: { ...axisText, rotate: 40 } },
-      yAxis: { type: "value", axisLabel: axisText, name: "元/㎡", nameTextStyle: axisText },
+      yAxis: {
+        type: "value",
+        axisLabel: axisText,
+        name: "元/㎡",
+        nameLocation: "end",
+        nameGap: 12,
+        nameTextStyle: { ...axisText, align: "right" }
+      },
       series: [{
         type: "boxplot", data: boxData,
         itemStyle: { color: palette.primary, borderColor: palette.dark },
@@ -258,7 +265,7 @@ const ChartsPanel = memo(function ChartsPanel({
       tooltip: {
         formatter: (params: unknown) => {
           const data = readPointTooltipData(params);
-          return `${data.name}<br/>房价 ${Math.round(data.value[0]).toLocaleString("zh-CN")} 元/㎡<br/>商圈活跃度 ${data.value[1].toFixed(1)}<br/>POI ${Math.round(data.value[2]).toLocaleString("zh-CN")}<br/>生活圈 ${data.value[3]?.toFixed(3) ?? "-"}`;
+          return `${data.name}<br/>房价 ${Math.round(data.value[0]).toLocaleString("zh-CN")} 元/㎡<br/>商圈活跃度 ${data.value[1].toFixed(1)}<br/>POI ${Math.round(data.value[2]).toLocaleString("zh-CN")}<br/>生活圈 ${formatScore(data.value[3])}`;
         }
       },
       xAxis: { type: "value", name: "平均房价", ...xAxisName },
@@ -268,8 +275,8 @@ const ChartsPanel = memo(function ChartsPanel({
         symbolSize: (value: number[]) => Math.max(10, Math.min(34, Math.sqrt(value[2]) / 12)),
         data: scatter.map((d) => ({
           name: d.district,
-          value: [d.avg_price, d.business_activity, d.poi_total, d.life_circle_score],
-          itemStyle: { color: lifeCircleColor(d.life_circle_score) }
+          value: [d.avg_price, d.business_activity, d.poi_total, displayScore(d, "life_circle_score")],
+          itemStyle: { color: displayScoreColor(displayScore(d, "life_circle_score")) }
         })),
         emphasis: {
           focus: "series",
@@ -287,7 +294,7 @@ const ChartsPanel = memo(function ChartsPanel({
   // K-means + PCA district clustering
   const districtClusteringOption = useMemo<EChartsOption>(() => {
     const features = ["affordability_score", "service_score", "vitality_score", "e2sfca_access_score", "life_circle_score", "avg_price"] as const;
-    const vectors = scatter.map((d) => features.map((f) => Number(d[f]) || 0));
+    const vectors = scatter.map((d) => features.map((f) => chartMetricValue(d, f)));
     if (vectors.length < 4) return { grid };
     const ranges = features.map((_, j) => {
       const vals = vectors.map((v) => v[j]);
@@ -340,27 +347,47 @@ const ChartsPanel = memo(function ChartsPanel({
           const idx = readNumericField(params, "dataIndex");
           if (idx < 0 || idx >= scatter.length) return "";
           const d = scatter[idx];
-          return `${d.district}<br/>簇: ${clusterProfile[idx]}<br/>评分 ${d.calibrated_score_life_circle.toFixed(3)}<br/>房价 ${Math.round(d.avg_price).toLocaleString("zh-CN")} 元/㎡`;
+          return `${d.district}<br/>簇: ${clusterProfile[idx]}<br/>评分 ${formatScore(displayScore(d, "calibrated_score_life_circle"))}<br/>房价 ${Math.round(d.avg_price).toLocaleString("zh-CN")} 元/㎡`;
         }
       },
       xAxis: { type: "value", name: "PC1", ...xAxisName },
       yAxis: { type: "value", name: "PC2", ...yAxisName },
       series: [{
         type: "scatter",
-        symbolSize: (value: number[]) => 12 + (value[2] ?? 0) * 20,
+        symbolSize: (value: number[]) => {
+          const score = Number(value[2]);
+          return Number.isFinite(score) ? 14 + Math.max(0, Math.min(10, score)) * 1.2 : 18;
+        },
         data: centered.map((v, i) => ({
           name: scatter[i].district,
           value: [
             centered[i].reduce((s, val, j) => s + val * e1.vec[j], 0),
             centered[i].reduce((s, val, j) => s + val * e2.vec[j], 0),
-            scatter[i].calibrated_score_life_circle
+            displayScore(scatter[i], "calibrated_score_life_circle")
           ],
-          itemStyle: { color: colors[labels[i]] }
+          itemStyle: {
+            color: colors[labels[i]],
+            opacity: scatter[i].district === selectedDistrict ? 1 : 0.72,
+            borderColor: scatter[i].district === selectedDistrict ? selectedColor : "#fff8eb",
+            borderWidth: scatter[i].district === selectedDistrict ? 3 : 1.5
+          }
         })),
-        emphasis: { focus: "series", label: { show: true, formatter: "{b}", position: "top" } }
+        label: {
+          show: true,
+          formatter: "{b}",
+          position: "top",
+          distance: 5,
+          color: "#4b3b31",
+          fontSize: 10
+        },
+        emphasis: {
+          focus: "series",
+          scale: 1.25,
+          label: { show: true, formatter: "{b}", position: "top", fontSize: 12, fontWeight: "bold" }
+        }
       }]
     };
-  }, [scatter]);
+  }, [scatter, selectedDistrict]);
 
   // ==================== MODULE 2: 设施与生活圈 ====================
   const poiOption = useMemo<EChartsOption>(() => ({
@@ -390,7 +417,7 @@ const ChartsPanel = memo(function ChartsPanel({
           const idx = readNumericField(params[0], "dataIndex");
           if (idx < 0 || idx >= rows.length) return "";
           const d = rows[idx];
-          return `${d.district}<br/>购物 ${d.shopping_count}<br/>交通 ${d.traffic_count}<br/>医疗 ${d.healthcare_count}<br/>休闲 ${d.recreation_count}<br/>企业 ${d.company_count}<br/><b>购物排名 #${shoppingTop5.findIndex((s) => s.district === d.district) + 1 || "-"}</b>`;
+          return `${d.district}<br/>购物 ${d.shopping_count}<br/>交通 ${d.traffic_count}<br/>医疗 ${d.healthcare_count}<br/>休闲 ${d.recreation_count}<br/>企业 ${d.company_count}`;
         }
       },
       legend: { top: 0, textStyle: axisText },
@@ -402,7 +429,7 @@ const ChartsPanel = memo(function ChartsPanel({
         data: rows.map((d) => ({ name: d.district, value: Number(d[field.key]) }))
       }))
     };
-  }, [scoreRanking, shoppingTop5]);
+  }, [scoreRanking]);
 
   const poiStackOption = useMemo<EChartsOption>(() => {
     const rows = [...scoreRanking].slice(0, 10);
@@ -431,7 +458,9 @@ const ChartsPanel = memo(function ChartsPanel({
       });
     // Find a comparison district (second-highest scored)
     const comparison = scatter.filter((d) => d.district !== selected.district)
-      .sort((a, b) => b.calibrated_score_life_circle - a.calibrated_score_life_circle)[0] ?? city;
+      .sort((a, b) =>
+        displayScore(b, "calibrated_score_life_circle") - displayScore(a, "calibrated_score_life_circle")
+      )[0] ?? city;
     return {
       color: [palette.primary, palette.accent, "#d8c4aa"],
       tooltip: { trigger: "item" },
@@ -503,7 +532,7 @@ const ChartsPanel = memo(function ChartsPanel({
     tooltip: {
       formatter: (params: unknown) => {
         const data = readPointTooltipData(params);
-        return `${data.name}<br/>房价 ${Math.round(data.value[0]).toLocaleString("zh-CN")} 元/㎡<br/>供需可达性 ${data.value[1].toFixed(3)}<br/>校准评分 ${data.value[2].toFixed(3)}`;
+        return `${data.name}<br/>房价 ${Math.round(data.value[0]).toLocaleString("zh-CN")} 元/㎡<br/>供需可达性 ${formatScore(data.value[1])}<br/>校准评分 ${formatScore(data.value[2])}`;
       }
     },
     xAxis: { type: "value", name: "平均房价 (元/㎡)", ...xAxisName },
@@ -562,7 +591,7 @@ const ChartsPanel = memo(function ChartsPanel({
       "e2sfca_access_score", "life_circle_score", "calibrated_score_life_circle",
       "affordability_score", "service_score", "vitality_score", "access_score", "value_score"
     ] as const;
-    const featureVectors = scatter.map((d) => allFields.map((f) => Number(d[f]) || 0));
+    const featureVectors = scatter.map((d) => allFields.map((f) => chartMetricValue(d, f)));
     const allRanges = allFields.map((_, j) => {
       const vals = featureVectors.map((v) => v[j]);
       return { min: Math.min(...vals), max: Math.max(...vals) };
@@ -610,7 +639,7 @@ const ChartsPanel = memo(function ChartsPanel({
           const name = readObjectField(params, "name");
           const districtName = typeof name === "string" ? name : "";
           const d = scatter.find((item) => item.district === districtName);
-          return d ? `${d.district}<br/>评分 ${d.calibrated_score_life_circle.toFixed(3)}<br/>房价 ${Math.round(d.avg_price).toLocaleString("zh-CN")} 元/㎡` : districtName;
+          return d ? `${d.district}<br/>评分 ${formatScore(displayScore(d, "calibrated_score_life_circle"))}<br/>房价 ${Math.round(d.avg_price).toLocaleString("zh-CN")} 元/㎡` : districtName;
         }
       },
       series: [{
@@ -975,7 +1004,7 @@ const ChartsPanel = memo(function ChartsPanel({
               <ChartCard chartId="poiShare" title="POI类别占比" desc="全市各类 POI 占比，反映上海整体配套结构。" scope="上海市全市" selectedDistrictForInsight={null} insightData={chartInsightData.poiShare} insight={insights.poiShare} loading={insightLoading.poiShare} error={insightErrors.poiShare} onInsight={loadChartInsight}>
                 <EChart option={poiOption} className="h-72 w-full" />
               </ChartCard>
-              <ChartCard chartId="groupedPoi" title="热门区域 POI 分组柱状图" desc="对比高评分区域中购物、交通、医疗三类 POI，tooltip 显示购物排名。" insightData={chartInsightData.groupedPoi} insight={insights.groupedPoi} loading={insightLoading.groupedPoi} error={insightErrors.groupedPoi} onInsight={loadChartInsight}>
+              <ChartCard chartId="groupedPoi" title="热门区域 POI 分组柱状图" desc="对比高评分区域中购物、交通、医疗三类 POI。" insightData={chartInsightData.groupedPoi} insight={insights.groupedPoi} loading={insightLoading.groupedPoi} error={insightErrors.groupedPoi} onInsight={loadChartInsight}>
                 <EChart option={groupedPoiOption} className="h-72 w-full" onClick={handleChartClick} />
               </ChartCard>
               <ChartCard chartId="poiStack" title="高评分区域 POI 结构" desc="展示Top10区域中不同 POI 类型的构成。" insightData={chartInsightData.poiStack} insight={insights.poiStack} loading={insightLoading.poiStack} error={insightErrors.poiStack} onInsight={loadChartInsight}>
@@ -1059,7 +1088,7 @@ function ChartCard({ title, children, desc, chartId, insightData, scope,
           className="absolute bottom-4 right-4 z-10 inline-flex h-9 items-center justify-center gap-2 rounded-lg border border-[#f0d1b5] bg-white/82 px-3 text-sm font-semibold text-[#c65f32] shadow-[0_8px_18px_rgba(104,72,42,0.12)] backdrop-blur transition hover:border-[#ffad7d] hover:bg-[#fff3e5] disabled:cursor-not-allowed disabled:opacity-70"
         >
           {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
-          {insight || error ? "查看结论" : "生成结论"}
+          {insight?.is_placeholder || error ? "重新生成" : insight ? "查看结论" : "生成结论"}
         </button>
         {insightOpen && hasInsightContent ? (
           <aside className="absolute right-4 top-0 z-20 flex max-h-[calc(100%-4rem)] w-[min(24rem,calc(100%-2rem))] flex-col rounded-xl border border-[#efcfb1] bg-[#fffaf0]/82 p-4 text-left shadow-[0_18px_48px_rgba(73,47,28,0.18)] backdrop-blur-md">
@@ -1261,13 +1290,6 @@ function buildAverageMetric(items: DistrictMetric[]): DistrictMetric {
     calibrated_score_life_circle_display: average(items, "calibrated_score_life_circle"),
     center_lng: null, center_lat: null
   };
-}
-
-function lifeCircleColor(score: number) {
-  if (score >= 0.5) return "#15803d";
-  if (score >= 0.3) return "#31b78f";
-  if (score >= 0.15) return "#f59e0b";
-  return "#ef6f61";
 }
 
 export default ChartsPanel;

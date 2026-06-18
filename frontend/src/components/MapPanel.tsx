@@ -5,7 +5,7 @@ import type { DistrictMetric, StreetMetric } from "../types/metrics";
 
 declare global {
   interface Window {
-    AMap?: any;
+    AMap?: AMapNamespace;
     _AMapSecurityConfig?: { securityJsCode?: string };
   }
 }
@@ -31,7 +31,7 @@ type StreetBoundary = {
   boundaries: Array<Array<[number, number]>>;
 };
 type StreetPolygonEntry = {
-  polygon: any;
+  polygon: AMapPolygon;
   district: string;
   street: string;
 };
@@ -40,6 +40,51 @@ type DistrictBubblePosition = {
   x: number;
   y: number;
   metric: DistrictMetric;
+};
+type AMapPixelLike = {
+  getX?: () => number;
+  getY?: () => number;
+  x?: number;
+  y?: number;
+};
+type AMapMap = {
+  add: (overlay: unknown) => void;
+  remove: (overlay: unknown) => void;
+  on: (event: string, handler: () => void) => void;
+  lngLatToContainer: (lngLat: unknown) => AMapPixelLike;
+};
+type AMapPolygon = {
+  on: (event: string, handler: (event: AMapMouseEvent) => void) => void;
+  setOptions: (options: Record<string, unknown>) => void;
+};
+type AMapInfoWindow = {
+  on: (event: string, handler: () => void) => void;
+  setContent: (content: string) => void;
+  open: (map: AMapMap, lngLat?: unknown) => void;
+  close: () => void;
+};
+type AMapDistrictSearch = {
+  search: (keyword: string, callback: (status: string, result: AMapDistrictSearchResult) => void) => void;
+};
+type AMapDistrictSearchResult = {
+  districtList?: Array<{
+    districtList?: Array<{
+      name: string;
+      adcode?: string;
+      boundaries?: DistrictBoundary["boundaries"];
+    }>;
+  }>;
+};
+type AMapMouseEvent = {
+  lnglat?: unknown;
+};
+type AMapNamespace = {
+  Map: new (container: HTMLDivElement, options: Record<string, unknown>) => AMapMap;
+  InfoWindow: new (options: Record<string, unknown>) => AMapInfoWindow;
+  Pixel: new (x: number, y: number) => unknown;
+  LngLat: new (lng: number, lat: number) => unknown;
+  Polygon: new (options: Record<string, unknown>) => AMapPolygon;
+  DistrictSearch: new (options: Record<string, unknown>) => AMapDistrictSearch;
 };
 
 const SHANGHAI_CENTER: [number, number] = [121.4737, 31.2304];
@@ -143,6 +188,26 @@ function mixColor(low: string, high: string, ratio: number) {
   return `rgb(${r}, ${g}, ${blue})`;
 }
 
+function getModeRatio(item: DistrictMetric, mode: MapMode, source: DistrictMetric[]) {
+  const config = mapModes[mode];
+  const values = source.map(config.value).filter((value) => Number.isFinite(value));
+  const min = values.length ? Math.min(...values) : 0;
+  const max = values.length ? Math.max(...values) : 1;
+  if (max === min) return 0.5;
+  return (config.value(item) - min) / (max - min);
+}
+
+function getModeColor(item: DistrictMetric, mode: MapMode, source: DistrictMetric[]) {
+  const config = mapModes[mode];
+  if (!Number.isFinite(config.value(item))) return "#f3f4f6";
+  return mixColor(config.low, config.high, getModeRatio(item, mode, source));
+}
+
+function getBubbleSize(item: DistrictMetric, mode: MapMode, source: DistrictMetric[]) {
+  const ratio = getModeRatio(item, mode, source);
+  return Math.round(36 + ratio * 28);
+}
+
 function streetKey(district: string, street: string) {
   return `${normalizeDistrictName(district)}::${street}`;
 }
@@ -154,11 +219,14 @@ function loadAmap() {
   if (securityCode) {
     window._AMapSecurityConfig = { securityJsCode: securityCode };
   }
-  return new Promise<any>((resolve, reject) => {
+  return new Promise<AMapNamespace>((resolve, reject) => {
     const script = document.createElement("script");
     script.src = `https://webapi.amap.com/maps?v=2.0&key=${key ?? ""}&plugin=AMap.DistrictSearch`;
     script.async = true;
-    script.onload = () => resolve(window.AMap);
+    script.onload = () => {
+      if (window.AMap) resolve(window.AMap);
+      else reject(new Error("AMap namespace missing"));
+    };
     script.onerror = () => reject(new Error("AMap script failed"));
     document.head.appendChild(script);
   });
@@ -187,11 +255,10 @@ async function fetchStreetMetrics(): Promise<StreetMetric[]> {
 
 const MapPanel = memo(function MapPanel({ districts, selectedDistrict, recommendations, onSelectDistrict }: MapPanelProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
-  const mapRef = useRef<any>(null);
-  const polygonsRef = useRef<Record<string, any[]>>({});
-  const districtOutlineRef = useRef<Record<string, any[]>>({});
+  const mapRef = useRef<AMapMap | null>(null);
+  const polygonsRef = useRef<Record<string, AMapPolygon[]>>({});
   const streetPolygonsRef = useRef<StreetPolygonEntry[]>([]);
-  const infoWindowRef = useRef<any>(null);
+  const infoWindowRef = useRef<AMapInfoWindow | null>(null);
   const bubbleFrameRef = useRef<number | null>(null);
   const selectedDistrictRef = useRef<string | null>(selectedDistrict);
   const mapModeRef = useRef<MapMode>("calibrated");
@@ -248,37 +315,18 @@ const MapPanel = memo(function MapPanel({ districts, selectedDistrict, recommend
     streetMetricByKeyRef.current = streetMetricByKey;
   }, [streetMetricByKey]);
 
-  const getModeRatio = (item: DistrictMetric, mode: MapMode, source: DistrictMetric[]) => {
-    const config = mapModes[mode];
-    const values = source.map(config.value).filter((value) => Number.isFinite(value));
-    const min = values.length ? Math.min(...values) : 0;
-    const max = values.length ? Math.max(...values) : 1;
-    if (max === min) return 0.5;
-    return (config.value(item) - min) / (max - min);
-  };
-
-  const getModeColor = (item: DistrictMetric, mode: MapMode, source: DistrictMetric[]) => {
-    const config = mapModes[mode];
-    if (!Number.isFinite(config.value(item))) return "#f3f4f6";
-    return mixColor(config.low, config.high, getModeRatio(item, mode, source));
-  };
-
-  const getBubbleSize = (item: DistrictMetric, mode: MapMode, source: DistrictMetric[]) => {
-    const ratio = getModeRatio(item, mode, source);
-    return Math.round(36 + ratio * 28);
-  };
-
-  const getPixelXY = (pixel: any) => ({
-    x: typeof pixel.getX === "function" ? pixel.getX() : pixel.x,
-    y: typeof pixel.getY === "function" ? pixel.getY() : pixel.y
+  const getPixelXY = (pixel: AMapPixelLike) => ({
+    x: typeof pixel.getX === "function" ? pixel.getX() : pixel.x ?? Number.NaN,
+    y: typeof pixel.getY === "function" ? pixel.getY() : pixel.y ?? Number.NaN
   });
 
   const updateDistrictBubblePositions = useCallback(() => {
     const map = mapRef.current;
-    if (!map || !window.AMap) return;
+    const AMap = window.AMap;
+    if (!map || !AMap) return;
     const next = districts.flatMap((metric) => {
       if (metric.center_lng === null || metric.center_lat === null) return [];
-      const pixel = map.lngLatToContainer(new window.AMap.LngLat(metric.center_lng, metric.center_lat));
+      const pixel = map.lngLatToContainer(new AMap.LngLat(metric.center_lng, metric.center_lat));
       const { x, y } = getPixelXY(pixel);
       if (!Number.isFinite(x) || !Number.isFinite(y)) return [];
       return [{ district: metric.district, x, y, metric }];
@@ -320,7 +368,7 @@ const MapPanel = memo(function MapPanel({ districts, selectedDistrict, recommend
           });
           infoWindowRef.current.on("close", () => setInfoWindowOpen(false));
 
-          const clearPolygons = (items: any[]) => {
+          const clearPolygons = (items: AMapPolygon[]) => {
             items.forEach((polygon) => map.remove(polygon));
           };
           const refreshDistrictBubbles = () => scheduleDistrictBubbleUpdate();
@@ -330,30 +378,6 @@ const MapPanel = memo(function MapPanel({ districts, selectedDistrict, recommend
           map.on("zoomend", refreshDistrictBubbles);
           map.on("resize", refreshDistrictBubbles);
           window.setTimeout(refreshDistrictBubbles, 0);
-
-          const drawDistrictOutlines = (districtList: DistrictBoundary[]) => {
-            if (cancelled) return;
-            clearPolygons(Object.values(districtOutlineRef.current).flat());
-            districtOutlineRef.current = {};
-            districtList.forEach((district) => {
-              const name = normalizeDistrictName(district.name);
-              if (!district.boundaries) return;
-              const outlines = district.boundaries.map((boundary: any) => {
-                const polygon = new AMap.Polygon({
-                  path: boundary,
-                  strokeColor: "#cbd5e1",
-                  strokeWeight: 1,
-                  strokeOpacity: 0.45,
-                  fillOpacity: 0,
-                  cursor: "default",
-                  zIndex: 2
-                });
-                map.add(polygon);
-                return polygon;
-              });
-              districtOutlineRef.current[name] = outlines;
-            });
-          };
 
           const drawStreetHeatmap = (streetList: StreetBoundary[], metricsForDraw?: StreetMetric[]) => {
             if (cancelled) return;
@@ -369,7 +393,7 @@ const MapPanel = memo(function MapPanel({ districts, selectedDistrict, recommend
             streetList.forEach((street) => {
               const districtName = normalizeDistrictName(street.district);
               const metric = metricMap.get(streetKey(districtName, street.name));
-              street.boundaries.forEach((boundary: any) => {
+              street.boundaries.forEach((boundary) => {
                 const polygon = new AMap.Polygon({
                   path: boundary,
                   strokeColor: metric ? "#ffffff" : "#d6d3d1",
@@ -380,7 +404,7 @@ const MapPanel = memo(function MapPanel({ districts, selectedDistrict, recommend
                   cursor: "pointer",
                   zIndex: 12
                 });
-                polygon.on("click", (event: any) => {
+                polygon.on("click", (event) => {
                   const mode = mapModeRef.current;
                   const modeConfig = mapModes[mode];
                   onSelectDistrict(districtName);
@@ -438,7 +462,7 @@ const MapPanel = memo(function MapPanel({ districts, selectedDistrict, recommend
               const name = normalizeDistrictName(district.name);
               const metric = metricByName.get(name);
               if (!metric || !district.boundaries) return;
-              const polygons = district.boundaries.map((boundary: any) => {
+              const polygons = district.boundaries.map((boundary) => {
                 const polygon = new AMap.Polygon({
                   path: boundary,
                   strokeColor: recommendationNames.has(name) ? "#0f766e" : "#334155",
@@ -450,7 +474,7 @@ const MapPanel = memo(function MapPanel({ districts, selectedDistrict, recommend
                   zIndex: recommendationNames.has(name) ? 14 : 10
                 });
                 polygon.on("click", () => onSelectDistrict(name));
-                polygon.on("mouseover", (event: any) => {
+                polygon.on("mouseover", (event) => {
                   polygon.setOptions({ fillOpacity: 0.12, strokeWeight: 2.2 });
                   infoWindowRef.current?.setContent(
                     `<div class="map-tooltip">
@@ -503,14 +527,14 @@ const MapPanel = memo(function MapPanel({ districts, selectedDistrict, recommend
               if (cancelled) return;
               loadBackendBoundaries();
             }, 10000);
-            districtSearch.search("上海市", (status: string, result: any) => {
+            districtSearch.search("上海市", (status, result) => {
               if (cancelled) return;
               if (boundaryTimer) window.clearTimeout(boundaryTimer);
               if (status !== "complete") {
                 loadBackendBoundaries();
                 return;
               }
-              const districtList = (result?.districtList?.[0]?.districtList ?? []).map((district: any) => ({
+              const districtList = (result.districtList?.[0]?.districtList ?? []).map((district) => ({
                 name: normalizeDistrictName(district.name),
                 adcode: district.adcode,
                 center: null,
